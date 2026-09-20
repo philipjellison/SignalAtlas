@@ -17,7 +17,7 @@ command -v curl >/dev/null || {
 
 autostart_dir="${XDG_CONFIG_HOME:-$HOME/.config}/labwc"
 autostart_file="$autostart_dir/autostart"
-kiosk_command="/opt/geochron-display/bin/geochron-kiosk &"
+kiosk_command="/opt/signalatlas/bin/signalatlas-kiosk &"
 mkdir -p "$autostart_dir"
 touch "$autostart_file"
 

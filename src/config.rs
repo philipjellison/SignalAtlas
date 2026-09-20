@@ -8,7 +8,7 @@ use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-pub const CONFIG_SCHEMA_VERSION: u32 = 5;
+pub const CONFIG_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -16,6 +16,8 @@ pub struct DisplayConfig {
     pub schema_version: u32,
     pub receiver_callsign: String,
     pub shack_locator: String,
+    pub station_name_visible: bool,
+    pub maidenhead_visible: bool,
     pub map_style: MapStyle,
     pub map_center: MapCenter,
     pub stretch_backgrounds: bool,
@@ -84,6 +86,8 @@ impl Default for DisplayConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
             receiver_callsign: "K3LR".into(),
             shack_locator: "EN91SE".into(),
+            station_name_visible: true,
+            maidenhead_visible: true,
             map_style: MapStyle::PoliticalRelief,
             map_center: MapCenter::Greenwich,
             stretch_backgrounds: false,
@@ -255,8 +259,20 @@ fn parse_and_migrate(bytes: &[u8]) -> anyhow::Result<DisplayConfig> {
         let object = value
             .as_object_mut()
             .context("configuration must be a JSON object")?;
-        object.insert("schema_version".into(), CONFIG_SCHEMA_VERSION.into());
+        object.insert("schema_version".into(), 5.into());
         object.insert("stretch_backgrounds".into(), false.into());
+    }
+    if value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        == Some(5)
+    {
+        let object = value
+            .as_object_mut()
+            .context("configuration must be a JSON object")?;
+        object.insert("schema_version".into(), CONFIG_SCHEMA_VERSION.into());
+        object.insert("station_name_visible".into(), true.into());
+        object.insert("maidenhead_visible".into(), true.into());
     }
     Ok(serde_json::from_value(value)?)
 }
@@ -347,5 +363,20 @@ mod tests {
         let migrated = parse_and_migrate(&serde_json::to_vec(&previous).unwrap()).unwrap();
         assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
         assert!(!migrated.stretch_backgrounds);
+        assert!(migrated.station_name_visible);
+        assert!(migrated.maidenhead_visible);
+    }
+
+    #[test]
+    fn migrates_previous_station_label_configuration() {
+        let mut previous = serde_json::to_value(DisplayConfig::default()).unwrap();
+        let object = previous.as_object_mut().unwrap();
+        object.insert("schema_version".into(), 5.into());
+        object.remove("station_name_visible");
+        object.remove("maidenhead_visible");
+        let migrated = parse_and_migrate(&serde_json::to_vec(&previous).unwrap()).unwrap();
+        assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
+        assert!(migrated.station_name_visible);
+        assert!(migrated.maidenhead_visible);
     }
 }

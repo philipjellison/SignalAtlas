@@ -26,23 +26,23 @@ The service listens on port 3000. From another LAN device, open `http://HOSTNAME
 
 ## x86_64 Linux
 
-Run `./deploy/install.sh` on a systemd-based x86_64 Linux computer. The service and LAN configuration interface work without a desktop. `install-kiosk.sh` targets labwc; other desktops should autostart `/opt/geochron-display/bin/geochron-kiosk` using their normal session settings.
+Run `./deploy/install.sh` on a systemd-based x86_64 Linux computer. The service and LAN configuration interface work without a desktop. `install-kiosk.sh` targets labwc; other desktops should autostart `/opt/signalatlas/bin/signalatlas-kiosk` using their normal session settings.
 
 ## Operation and recovery
 
-- Application configuration persists at `/var/lib/geochron-display/config.json` using atomic replacement.
+- Application configuration persists at `/var/lib/signalatlas/config.json` using atomic replacement.
 - The system service restarts after a process failure.
 - The kiosk waits for the service during boot and restarts Chromium if it exits.
 - A running display keeps its locally loaded map and astronomy layers if Wi-Fi or Internet access is lost.
-- Live WSPR refreshes every two minutes while enabled. Historical 6/12/24/48-hour windows are fetched once per receiver/window selection and replayed locally. The last successful response is cached at `/var/lib/geochron-display/wspr-cache.json`; provider failures retain those pins and mark them as cached.
+- Live WSPR refreshes every two minutes while enabled. Historical 6/12/24/48-hour windows are fetched once per receiver/window selection and replayed locally. The last successful response is cached at `/var/lib/signalatlas/wspr-cache.json`; provider failures retain those pins and mark them as cached.
 - If the local service disconnects, the display reports `reconnecting…` and then `offline · cached display`; it reconnects automatically.
 
 Useful commands:
 
 ```sh
-systemctl status geochron-display
-journalctl -u geochron-display -f
-sudo systemctl restart geochron-display
+systemctl status signalatlas
+journalctl -u signalatlas -f
+sudo systemctl restart signalatlas
 curl --fail http://127.0.0.1:3000/api/health
 ```
 

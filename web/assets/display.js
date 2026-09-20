@@ -3,7 +3,7 @@ import { solarPosition } from "./astronomy.js";
 import { displayTimestamp } from "./timeline.js";
 import { parseWsprTime, visibleSpots } from "./wspr.js";
 import { maidenheadToCoordinates } from "./map.js";
-import { centerLongitude, mapLayout, politicalTimezoneLabels, solarFixedScreenPosition, timezoneLabelVerticalOffset, timezoneSegments } from "./webgl-prototype-core.js";
+import { centerLongitude, mapLayout, politicalTimezoneLabels, solarFixedScreenPosition, timezoneLabelVerticalOffset, timezoneSegments } from "./display-core.js";
 const MAX_WIDTH = 2560;
 const MAX_HEIGHT = 1440;
 const BASE_VERTEX_BYTES = 6 * Float32Array.BYTES_PER_ELEMENT;
@@ -186,11 +186,25 @@ async function loadTexture(gl, url, unit) {
   return { texture, estimatedBytes };
 }
 
-const canvas = document.querySelector("#prototype-map");
-const metrics = document.querySelector("#prototype-metrics");
-const timeLabel = document.querySelector("#prototype-time");
-const shackLabel = document.querySelector("#prototype-shack-label");
-const timezoneLabelLayer = document.querySelector("#prototype-timezone-labels");
+const canvas = document.querySelector("#display-map");
+const metrics = document.querySelector("#display-metrics");
+const timeLabel = document.querySelector("#display-time");
+const stationName = document.querySelector("#display-station-name");
+const shackLabel = document.querySelector("#display-shack-label");
+const timezoneLabelLayer = document.querySelector("#display-timezone-labels");
+let contextRecoveryTimer = null;
+canvas.addEventListener("webglcontextlost", event => {
+  event.preventDefault();
+  console.error("WebGL context lost; reloading the SignalAtlas display to recover");
+  metrics.textContent = "WebGL context lost · reloading display…";
+  contextRecoveryTimer ??= window.setTimeout(() => window.location.reload(), 3000);
+});
+canvas.addEventListener("webglcontextrestored", () => {
+  console.warn("WebGL context restored; reloading the SignalAtlas display to rebuild renderer resources");
+  metrics.textContent = "WebGL context restored · rebuilding display…";
+  if (contextRecoveryTimer !== null) window.clearTimeout(contextRecoveryTimer);
+  contextRecoveryTimer = window.setTimeout(() => window.location.reload(), 250);
+});
 const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false, powerPreference: "high-performance" });
 if (!gl) throw new Error("WebGL2 is unavailable");
 let gpuTimer = null;
@@ -543,7 +557,13 @@ function draw() {
   gl.uniform1f(shackUniforms.scale, Math.max(0.75, canvas.width / 1920));
   gl.drawArrays(gl.POINTS, 0, 1);
   const shackScreen = solarFixedScreenPosition(shack.longitude, shack.latitude, mapCenter);
-  shackLabel.textContent = `${state.receiver_callsign} · ${state.shack_locator}`;
+  stationName.textContent = state.receiver_callsign;
+  stationName.hidden = !state.station_name_visible;
+  const shackLabelParts = [];
+  if (state.station_name_visible) shackLabelParts.push(state.receiver_callsign);
+  if (state.maidenhead_visible) shackLabelParts.push(state.shack_locator);
+  shackLabel.textContent = shackLabelParts.join(" · ");
+  shackLabel.hidden = shackLabelParts.length === 0;
   shackLabel.style.left = `${shackScreen.x * 100}%`;
   shackLabel.style.top = `${currentMapLayout.top + shackScreen.y * currentMapLayout.height}px`;
   shackLabel.dataset.edge = shackScreen.x > 0.9 ? "right" : "left";

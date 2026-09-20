@@ -1,4 +1,4 @@
-# Geochron / HamSCI Display
+# SignalAtlas
 
 A Raspberry Pi and x86_64 Linux world-map appliance with synchronized browser displays. The project uses a Rust service and framework-free browser clients.
 
@@ -12,14 +12,14 @@ cargo run
 
 Open `http://localhost:3000/` for the display and `http://localhost:3000/config` for configuration. To test synchronization, open the display in two browser windows, change a setting in the configuration page, and save it. Both displays update without reloading.
 
-An experimental, non-production WebGL2 renderer is available at `http://localhost:3000/webgl-prototype`. It currently tests a solar-fixed rotating Earth and shader-based terminator while leaving the production Canvas renderer unchanged. See [docs/webgl-prototype.md](docs/webgl-prototype.md).
+The production display uses the WebGL2 renderer at the root URL. The previous Canvas renderer remains temporarily available at `http://localhost:3000/canvas-display` as a stabilization reference. See [docs/webgl-renderer.md](docs/webgl-renderer.md).
 
 For Raspberry Pi OS Trixie appliance installation and x86_64 systemd deployment, see [docs/appliance.md](docs/appliance.md).
 
 Configuration is written atomically to `data/config.json`. Override defaults with:
 
 ```sh
-GEOCHRON_BIND=127.0.0.1:8080 GEOCHRON_CONFIG=/path/to/config.json cargo run
+SIGNALATLAS_BIND=127.0.0.1:8080 SIGNALATLAS_CONFIG=/path/to/config.json cargo run
 ```
 
 ## Current scope
@@ -29,7 +29,7 @@ Stages 0 through 7 provide synchronized persistent configuration, an offline res
 Run browser-side coordinate tests with:
 
 ```sh
-node --test web/assets/map.test.mjs web/assets/astronomy.test.mjs web/assets/geography.test.mjs web/assets/wspr.test.mjs web/assets/timeline.test.mjs web/assets/presets.test.mjs
+node --test web/assets/*.test.mjs
 ```
 
 ## License

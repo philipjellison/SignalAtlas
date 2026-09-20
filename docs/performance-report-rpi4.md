@@ -1,6 +1,6 @@
 # Raspberry Pi 4 Performance Evaluation
 
-**Project:** Geochron / HamSCI Display  
+**Project:** SignalAtlas
 **Test date:** August 25, 2026  
 **Purpose:** Evaluate 4K browser rendering, historical WSPR playback, startup behavior, memory pressure, GPU use, and thermal stability on the intended class of appliance hardware.
 

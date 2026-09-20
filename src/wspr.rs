@@ -80,7 +80,7 @@ impl WsprLiveSource {
     pub fn new(endpoint: String) -> anyhow::Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(20))
-            .user_agent("geochron-hamsci-display/0.1")
+            .user_agent("signalatlas/0.1")
             .build()?;
         Ok(Self { client, endpoint })
     }

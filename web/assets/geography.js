@@ -186,7 +186,10 @@ export class GeographyOverlay {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#fff4bb";
     const labelX = point.x > width - 140 * scale ? -13 * scale : 13 * scale;
-    ctx.fillText(`${this.state.receiver_callsign} · ${this.state.shack_locator}`, labelX, -radius * 1.4);
+    const labelParts = [];
+    if (this.state.station_name_visible) labelParts.push(this.state.receiver_callsign);
+    if (this.state.maidenhead_visible) labelParts.push(this.state.shack_locator);
+    if (labelParts.length > 0) ctx.fillText(labelParts.join(" · "), labelX, -radius * 1.4);
     ctx.restore();
   }
 }

@@ -1,10 +1,10 @@
-# WebGL2 renderer prototype
+# WebGL2 renderer
 
 ## Architecture assessment
 
 WebGL2 is practical for the Raspberry Pi 4 experiment. Chromium on the test Pi exposed an accelerated GLES path through ANGLE, `vc4`, and `v3d`. A single WebGL drawing surface can replace several large Canvas 2D backing stores, while a fragment shader can calculate solar elevation and civil twilight without transferring a two-million-pixel JavaScript mask.
 
-The first prototype is intentionally separate from the production display at `/webgl-prototype`. It does not replace or modify the working Canvas renderer. Its bounded scope is:
+After extended testing, this implementation is the production SignalAtlas display at the root route. The previous Canvas renderer remains available at `/canvas-display` as a temporary fallback and reference. Its scope is:
 
 - Blue Marble daytime texture;
 - Black Marble nighttime texture;
@@ -30,7 +30,7 @@ Country and timezone geometry, WSPR geometry, and the shack marker have now been
 
 ## Expected memory difference
 
-The production renderer maintains four visible full-screen canvas buffers plus an additional night-lights compositing canvas and a terminator mask. The prototype maintains one visible color buffer and two immutable 4096×2048 textures. Exact GPU allocation is implementation-dependent, but it eliminates repeated full-screen backing surfaces and all per-frame terminator-mask uploads.
+The previous Canvas renderer maintains four visible full-screen canvas buffers plus an additional night-lights compositing canvas and a terminator mask. The WebGL renderer maintains one visible color buffer and two immutable 4096×2048 textures. Exact GPU allocation is implementation-dependent, but it eliminates repeated full-screen backing surfaces and all per-frame terminator-mask uploads.
 
 ## Coordinate model
 
@@ -42,6 +42,6 @@ The Earth-fixed textures therefore rotate continuously as the subsolar longitude
 
 The map displays latitudes +75° through −75°, matching the production crop. Horizontal texture lookup wraps with `fract()`, avoiding a discontinuity when Earth longitude crosses ±180°.
 
-## Evaluation gate
+## Production status
 
-Do not migrate additional layers until the prototype is tested on the Pi for frame time, Chromium CPU, available RAM, GPU/shared memory, visual correctness, terminator accuracy, and seam/alignment behavior. The production Canvas renderer remains the default and rollback path.
+The renderer remains deliberately uncapped for benchmarking and retains its on-screen timing, geometry, buffer, texture, background, and resolution diagnostics. These can be made optional in a later change. WebGL context loss triggers a logged page reload so an unattended display does not remain blank.

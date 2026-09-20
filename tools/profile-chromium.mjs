@@ -1,7 +1,7 @@
 const endpoint = process.argv[2] || "http://127.0.0.1:9222";
 const targets = await fetch(`${endpoint}/json/list`).then(response => response.json());
 const target = targets.find(item => item.type === "page" && item.url.includes("127.0.0.1:3000"));
-if (!target) throw new Error("Geochron page target not found");
+if (!target) throw new Error("SignalAtlas page target not found");
 const socketUrl = target.webSocketDebuggerUrl.replace("127.0.0.1:9222", new URL(endpoint).host);
 const socket = new WebSocket(socketUrl);
 await new Promise((resolve, reject) => {
@@ -29,9 +29,9 @@ function command(method, params = {}) {
 await command("Page.enable");
 await command("Runtime.enable");
 await command("Page.addScriptToEvaluateOnNewDocument", {
-  source: `window.__geochronLongTasks = [];
+  source: `window.__signalAtlasLongTasks = [];
     new PerformanceObserver(list => {
-      for (const entry of list.getEntries()) window.__geochronLongTasks.push({ start: entry.startTime, duration: entry.duration });
+      for (const entry of list.getEntries()) window.__signalAtlasLongTasks.push({ start: entry.startTime, duration: entry.duration });
     }).observe({ type: "longtask", buffered: true });`,
 });
 
@@ -47,7 +47,7 @@ const result = await command("Runtime.evaluate", {
     terminatorTimestamp: document.querySelector("#terminator")?.dataset.timestamp,
     canvases: [...document.querySelectorAll("canvas")].map(canvas => ({ id: canvas.id, width: canvas.width, height: canvas.height })),
     resources: performance.getEntriesByType("resource").map(entry => ({ name: entry.name.split("/").pop(), duration: Math.round(entry.duration), bytes: entry.transferSize })),
-    longTasks: window.__geochronLongTasks || [],
+    longTasks: window.__signalAtlasLongTasks || [],
     heap: performance.memory ? { used: performance.memory.usedJSHeapSize, total: performance.memory.totalJSHeapSize } : null,
   }))()`,
 });

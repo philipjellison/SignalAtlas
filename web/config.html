@@ -1,11 +1,13 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Geochron Configuration</title><link rel="stylesheet" href="/assets/style.css"></head>
-<body><main class="config"><h1>Geochron Configuration</h1><p>Changes here are global and appear on every connected display.</p>
-  <section class="presets"><h2>Presentation presets</h2><div id="presets"></div></section>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SignalAtlas Configuration</title><link rel="stylesheet" href="/assets/style.css"></head>
+<body><main class="config"><h1>SignalAtlas Configuration</h1><p>Changes here are global and appear on every connected display.</p>
+  <section class="presets"><h2>Presentation presets</h2><div id="presets"></div><button type="button" id="save-preset">Save current as preset</button><div class="playback-actions" id="preset-actions" hidden><button type="button" id="update-preset">Update</button><button type="button" id="rename-preset">Rename</button><button type="button" id="delete-preset">Delete</button></div></section>
   <form id="form">
     <label>Receiver callsign<input name="receiver_callsign" required></label>
     <label>Shack Maidenhead locator<input name="shack_locator" minlength="6" maxlength="6" required></label>
+    <label><input name="station_name_visible" type="checkbox"> Show station name</label>
+    <label><input name="maidenhead_visible" type="checkbox"> Show Maidenhead locator</label>
     <label>Map style<select name="map_style"><option value="political_relief">Political relief</option><option value="natural_earth">Natural Earth</option><option value="blue_marble">NASA Blue Marble</option><option value="blue_marble_lights">NASA Blue Marble + night lights</option></select></label>
     <label>Map center<select name="map_center"><option value="greenwich">Greenwich</option><option value="shack">Shack</option><option value="terminator">Terminator (solar-fixed)</option></select></label>
     <label><input name="stretch_backgrounds" type="checkbox"> Stretch map to fill screen</label>
@@ -26,17 +28,32 @@
 </main><script type="module">
   import { connectState, saveState } from "/assets/app.js";
   import { playbackProgress } from "/assets/timeline.js";
-  import { PRESETS, applyPreset } from "/assets/presets.js";
-  const form = document.querySelector("#form"); const message = document.querySelector("#message"); const playPause = document.querySelector("#play-pause"); let state;
+  const form = document.querySelector("#form"); const message = document.querySelector("#message"); const playPause = document.querySelector("#play-pause"); const presetContainer = document.querySelector("#presets"); const presetActions = document.querySelector("#preset-actions"); let state; let presets = []; let selectedPresetId = null;
   const updateControls = () => { const historical = form.elements.wspr_mode.value === "historical"; document.querySelectorAll("[data-history]").forEach(element => { element.classList.toggle("disabled", !historical); element.querySelectorAll("input,select,button").forEach(control => control.disabled = !historical); }); };
   connectState(next => { state = next; for (const [key, value] of Object.entries(next)) { const field = form.elements.namedItem(key); if (!field) continue; field.type === "checkbox" ? field.checked = value : field.value = value; } playPause.textContent = state.playback_running ? "Pause playback" : "Resume playback"; updateControls(); });
   form.elements.wspr_mode.addEventListener("change", updateControls);
-  const presetContainer = document.querySelector("#presets");
-  for (const preset of PRESETS) { const button = document.createElement("button"); button.type = "button"; button.textContent = preset.label; button.addEventListener("click", async () => { message.textContent = `Applying ${preset.label}…`; try { await saveState(applyPreset(state, preset.id)); message.textContent = `${preset.label} applied to all displays.`; } catch (error) { message.textContent = error.message; } }); presetContainer.append(button); }
+  const presetRequest = async (url, options = {}) => {
+    const response = await fetch(url, options); const body = response.status === 204 ? null : await response.json();
+    if (!response.ok) throw new Error(body?.error || "Unable to update presets"); return body;
+  };
+  const renderPresets = () => {
+    presetContainer.replaceChildren();
+    for (const preset of presets) { const button = document.createElement("button"); button.type = "button"; button.textContent = preset.name; button.classList.toggle("selected", preset.id === selectedPresetId); button.addEventListener("click", async () => {
+      message.textContent = `Applying ${preset.name}…`; try { state = await presetRequest(`/api/presets/${encodeURIComponent(preset.id)}/apply`, { method: "POST" }); selectedPresetId = preset.id; renderPresets(); message.textContent = `${preset.name} applied to all displays.`; } catch (error) { message.textContent = error.message; }
+    }); presetContainer.append(button); }
+    presetActions.hidden = !selectedPresetId;
+  };
+  const loadPresets = async () => { try { presets = await presetRequest("/api/presets"); if (!presets.some(preset => preset.id === selectedPresetId)) selectedPresetId = null; renderPresets(); } catch (error) { message.textContent = error.message; } };
+  document.querySelector("#save-preset").addEventListener("click", async () => { const name = window.prompt("Preset name:"); if (name === null) return; try { const preset = await presetRequest("/api/presets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); presets.push(preset); selectedPresetId = preset.id; renderPresets(); message.textContent = `${preset.name} saved.`; } catch (error) { message.textContent = error.message; } });
+  document.querySelector("#update-preset").addEventListener("click", async () => { if (!selectedPresetId) return; try { const preset = await presetRequest(`/api/presets/${encodeURIComponent(selectedPresetId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ save_current: true }) }); presets = presets.map(item => item.id === preset.id ? preset : item); renderPresets(); message.textContent = `${preset.name} updated.`; } catch (error) { message.textContent = error.message; } });
+  document.querySelector("#rename-preset").addEventListener("click", async () => { const selected = presets.find(preset => preset.id === selectedPresetId); if (!selected) return; const name = window.prompt("Preset name:", selected.name); if (name === null) return; try { const preset = await presetRequest(`/api/presets/${encodeURIComponent(selected.id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, save_current: false }) }); presets = presets.map(item => item.id === preset.id ? preset : item); renderPresets(); message.textContent = "Preset renamed."; } catch (error) { message.textContent = error.message; } });
+  document.querySelector("#delete-preset").addEventListener("click", async () => { const selected = presets.find(preset => preset.id === selectedPresetId); if (!selected || !window.confirm(`Delete preset \"${selected.name}\"?`)) return; try { await presetRequest(`/api/presets/${encodeURIComponent(selected.id)}`, { method: "DELETE" }); presets = presets.filter(preset => preset.id !== selected.id); selectedPresetId = null; renderPresets(); message.textContent = "Preset deleted."; } catch (error) { message.textContent = error.message; } });
+  loadPresets();
   form.addEventListener("submit", async event => { event.preventDefault(); message.textContent = "Saving…";
     const data = new FormData(form); const next = { ...state };
     for (const name of ["receiver_callsign", "shack_locator", "map_style", "map_center", "terminator_mode", "timezone_style", "wspr_band", "wspr_mode"]) next[name] = data.get(name);
     next.night_intensity = Number(data.get("night_intensity")); next.timezone_visible = data.has("timezone_visible"); next.stretch_backgrounds = data.has("stretch_backgrounds");
+    next.station_name_visible = data.has("station_name_visible"); next.maidenhead_visible = data.has("maidenhead_visible");
     next.wspr_visible = data.has("wspr_visible"); next.wspr_persistence_minutes = Number(data.get("wspr_persistence_minutes"));
     if (next.wspr_mode === "historical") {
       next.history_hours = Number(data.get("history_hours")); next.playback_duration_seconds = Number(data.get("playback_duration_seconds")); next.playback_loop = data.has("playback_loop");

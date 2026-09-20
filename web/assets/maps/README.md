@@ -11,4 +11,4 @@ Natural Earth raster and vector data are in the public domain. Project informati
 
 NASA content is generally not subject to copyright in the United States. NASA is acknowledged as the source; its identifiers are not used and no endorsement is implied. Usage guidelines: <https://www.nasa.gov/nasa-brand-center/images-and-media/>.
 
-The political-relief Canvas style applies country color at runtime; the WebGL prototype uses the equivalent precomposited texture to avoid triangulating country fills every frame. The reference photographs in the project root are not application assets and are not served to clients.
+The political-relief Canvas style applies country color at runtime; the WebGL renderer uses the equivalent precomposited texture to avoid triangulating country fills every frame. The reference photographs in the project root are not application assets and are not served to clients.

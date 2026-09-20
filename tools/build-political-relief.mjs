@@ -6,8 +6,8 @@ const projectRoot = path.resolve(import.meta.dirname, "..");
 const mapRoot = path.join(projectRoot, "web/assets/maps");
 const countries = JSON.parse(fs.readFileSync(path.join(mapRoot, "countries-50m.geojson"), "utf8"));
 const palette = ["#f07a32", "#efbd32", "#68bd3f", "#24ad73", "#df5542", "#bd8737", "#e7cf55", "#31a5a0"];
-const temporarySvg = "/tmp/geochron-political-overlay.svg";
-const temporaryPng = "/tmp/geochron-political-overlay.png";
+const temporarySvg = "/tmp/signalatlas-political-overlay.svg";
+const temporaryPng = "/tmp/signalatlas-political-overlay.png";
 
 function colorFor(feature) {
   const text = feature.properties.ADM0_A3 || feature.properties.NAME || "country";

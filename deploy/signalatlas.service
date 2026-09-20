@@ -1,17 +1,17 @@
 [Unit]
-Description=Geochron HamSCI Display
+Description=SignalAtlas Display
 After=network.target
 Wants=network.target
 
 [Service]
 Type=simple
 DynamicUser=yes
-StateDirectory=geochron-display
-WorkingDirectory=/opt/geochron-display
-ExecStart=/opt/geochron-display/bin/geochron-display
-Environment=GEOCHRON_BIND=0.0.0.0:3000
-Environment=GEOCHRON_CONFIG=/var/lib/geochron-display/config.json
-Environment=GEOCHRON_WSPR_CACHE=/var/lib/geochron-display/wspr-cache.json
+StateDirectory=signalatlas
+WorkingDirectory=/opt/signalatlas
+ExecStart=/opt/signalatlas/bin/signalatlas
+Environment=SIGNALATLAS_BIND=0.0.0.0:3000
+Environment=SIGNALATLAS_CONFIG=/var/lib/signalatlas/config.json
+Environment=SIGNALATLAS_WSPR_CACHE=/var/lib/signalatlas/wspr-cache.json
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=yes

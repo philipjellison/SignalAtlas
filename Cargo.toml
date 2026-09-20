@@ -1,9 +1,9 @@
 [package]
-name = "geochron-display"
+name = "signalatlas"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "A Raspberry Pi world map and HamSCI/WSPR display appliance"
+description = "The SignalAtlas world map and HamSCI/WSPR display appliance"
 
 [dependencies]
 anyhow = "1"

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { centerLongitude, mapLayout, normalizeLongitude, politicalTimezoneLabels, shouldDrawFrame, solarFixedEarthLongitude, solarFixedScreenPosition, textureCoordinates, timezoneLabelVerticalOffset, timezoneSegments } from "./webgl-prototype-core.js";
+import { centerLongitude, mapLayout, normalizeLongitude, politicalTimezoneLabels, shouldDrawFrame, solarFixedEarthLongitude, solarFixedScreenPosition, textureCoordinates, timezoneLabelVerticalOffset, timezoneSegments } from "./display-core.js";
 
 test("solar-fixed longitude rotates Earth beneath a stationary subsolar point", () => {
   assert.equal(solarFixedEarthLongitude(0, 45), 45);
