@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Geochron Display</title><link rel="stylesheet" href="/assets/style.css"></head>
+<body class="display">
+  <main class="map-frame">
+    <div class="map-canvas">
+      <canvas id="world-map" aria-label="Equirectangular world map"></canvas>
+      <canvas id="terminator" aria-label="UTC day and night terminator"></canvas>
+      <canvas id="wspr" aria-label="Recently received WSPR transmitter locations"></canvas>
+      <canvas id="geography" aria-label="UTC timezone grid and shack location"></canvas>
+    </div>
+    <div class="info-bar info-top"><strong id="station-name">K3LR · EN91SE</strong><time id="utc-time">UTC</time></div>
+    <div class="map-caption"><strong id="style-name">Loading map…</strong><span id="center-name"></span></div>
+  </main>
+  <span class="status" id="status">connecting</span>
+  <script type="module">
+    import { connectState } from "/assets/app.js";
+    import { WorldMap } from "/assets/map.js";
+    import { TerminatorOverlay } from "/assets/astronomy.js";
+    import { GeographyOverlay } from "/assets/geography.js";
+    import { WsprOverlay } from "/assets/wspr.js";
+    const map = new WorldMap(document.querySelector("#world-map"));
+    const geography = new GeographyOverlay(document.querySelector("#geography"));
+    const wspr = new WsprOverlay(document.querySelector("#wspr"));
+    const terminator = new TerminatorOverlay(document.querySelector("#terminator"), () => wspr.displayTime());
+    const styleName = document.querySelector("#style-name");
+    const centerName = document.querySelector("#center-name");
+    const stationName = document.querySelector("#station-name");
+    const utcTime = document.querySelector("#utc-time");
+    const mapFrame = document.querySelector(".map-frame");
+    const status = document.querySelector("#status");
+    let currentState; let timelineTick = 0;
+    connectState(state => {
+      currentState = state;
+      map.setState(state);
+      terminator.setState(state);
+      geography.setState(state);
+      wspr.setState(state);
+      mapFrame.classList.toggle("stretch-map", state.stretch_backgrounds);
+      stationName.textContent = `${state.receiver_callsign} · ${state.shack_locator}`;
+      const styleNames = { political_relief: "Political Relief", natural_earth: "Natural Earth", blue_marble: "NASA Blue Marble", blue_marble_lights: "NASA Blue Marble + Night Lights" };
+      styleName.textContent = styleNames[state.map_style] || "World Map";
+      centerName.textContent = state.map_center === "shack" ? `${state.receiver_callsign} · ${state.shack_locator} centered` : state.map_center === "terminator" ? "Terminator centered (WebGL)" : "Greenwich centered";
+    }, connection => {
+      const labels = { connected: "connected", reconnecting: "reconnecting…", offline: "offline · cached display" };
+      status.textContent = labels[connection] || connection;
+      status.dataset.state = connection;
+    });
+    const updateUtcClock = () => { utcTime.textContent = `${new Date().toISOString().slice(0, 19).replace("T", " ")} UTC`; };
+    updateUtcClock(); window.setInterval(updateUtcClock, 1000);
+    window.setInterval(() => {
+      if (!currentState) return;
+      timelineTick += 1;
+      const now = new Date();
+      const historical = currentState.wspr_mode === "historical";
+      if (historical || timelineTick % 3 === 0) wspr.render(now);
+      if (historical || timelineTick % 6 === 0) terminator.render(wspr.displayTime(now));
+    }, 5000);
+  </script>
+</body>
+</html>

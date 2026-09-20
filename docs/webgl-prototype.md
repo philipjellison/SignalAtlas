@@ -1,0 +1,47 @@
+# WebGL2 renderer prototype
+
+## Architecture assessment
+
+WebGL2 is practical for the Raspberry Pi 4 experiment. Chromium on the test Pi exposed an accelerated GLES path through ANGLE, `vc4`, and `v3d`. A single WebGL drawing surface can replace several large Canvas 2D backing stores, while a fragment shader can calculate solar elevation and civil twilight without transferring a two-million-pixel JavaScript mask.
+
+The first prototype is intentionally separate from the production display at `/webgl-prototype`. It does not replace or modify the working Canvas renderer. Its bounded scope is:
+
+- Blue Marble daytime texture;
+- Black Marble nighttime texture;
+- distinct Blue Marble modes with night lights enabled only for the configured night-lights background;
+- a lazily loaded Natural Earth texture and an on-screen conservative estimate of decoded GPU texture memory;
+- a lazily loaded, precomposited political-relief texture generated from the existing public-domain Natural Earth assets;
+- solar-fixed idealized and political UTC labels with screen-space collision reduction and an on-screen visible-label count;
+- the existing stretch-background setting, with a centered 2:1 map and black information space when stretching is disabled;
+- selectable Greenwich-fixed, shack-fixed, or terminator/solar-fixed centering, with every geographic layer sharing the selected longitude transform;
+- one WebGL2 canvas capped at 2560×1440;
+- continuously advancing historical/current time with no application frame-rate cap (browser animation remains synchronized to the display refresh rate);
+- GPU-completed frame timing through `EXT_disjoint_timer_query_webgl2`, when the browser exposes it, alongside JavaScript submission timing;
+- live or historical WSPR cells rendered as GPU point sprites, using the existing band, persistence, visibility, and playback configuration;
+- idealized or political timezone boundaries rendered as simplified, instanced GPU line segments;
+- on-screen WSPR point count, submitted vertices per frame, and allocated vertex-buffer memory for tracking geometry growth;
+- a GPU-rendered shack marker and screen-space station label driven by the same solar-fixed transform;
+- simplified country boundaries rendered through the same instanced, antimeridian-safe GPU line path as timezone geometry;
+- solar-fixed presentation, with the subsolar longitude fixed at screen center and the Earth textures rotating beneath it;
+- hard-edge and civil-twilight shading in a fragment shader;
+- live frame-time/FPS and simulated-time diagnostics.
+
+Country and timezone geometry, WSPR geometry, and the shack marker have now been added incrementally after the base experiment demonstrated substantial local headroom. Additional labels and background implementations remain staged separately so each performance change can be measured.
+
+## Expected memory difference
+
+The production renderer maintains four visible full-screen canvas buffers plus an additional night-lights compositing canvas and a terminator mask. The prototype maintains one visible color buffer and two immutable 4096×2048 textures. Exact GPU allocation is implementation-dependent, but it eliminates repeated full-screen backing surfaces and all per-frame terminator-mask uploads.
+
+## Coordinate model
+
+Screen longitude is relative to the Sun: 0° at screen center and ±180° at the horizontal edges. For each frame:
+
+`Earth longitude = screen-relative longitude + subsolar longitude`
+
+The Earth-fixed textures therefore rotate continuously as the subsolar longitude changes, while the shader's hour angle—and thus the horizontal position of the terminator—stays fixed. Solar declination remains time-dependent and changes the terminator's shape.
+
+The map displays latitudes +75° through −75°, matching the production crop. Horizontal texture lookup wraps with `fract()`, avoiding a discontinuity when Earth longitude crosses ±180°.
+
+## Evaluation gate
+
+Do not migrate additional layers until the prototype is tested on the Pi for frame time, Chromium CPU, available RAM, GPU/shared memory, visual correctness, terminator accuracy, and seam/alignment behavior. The production Canvas renderer remains the default and rollback path.

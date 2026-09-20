@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -u
+
+display_url="${GEOCHRON_DISPLAY_URL:-http://127.0.0.1:3000/}"
+
+while ! curl --fail --silent --output /dev/null "${display_url%/}/api/health"; do
+  sleep 1
+done
+
+while true; do
+  chromium \
+    --kiosk \
+    --noerrdialogs \
+    --disable-infobars \
+    --no-first-run \
+    --disable-session-crashed-bubble \
+    --disable-pinch \
+    --overscroll-history-navigation=0 \
+    --start-maximized \
+    "$display_url"
+  sleep 2
+done

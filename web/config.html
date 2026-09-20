@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Geochron Configuration</title><link rel="stylesheet" href="/assets/style.css"></head>
+<body><main class="config"><h1>Geochron Configuration</h1><p>Changes here are global and appear on every connected display.</p>
+  <section class="presets"><h2>Presentation presets</h2><div id="presets"></div></section>
+  <form id="form">
+    <label>Receiver callsign<input name="receiver_callsign" required></label>
+    <label>Shack Maidenhead locator<input name="shack_locator" minlength="6" maxlength="6" required></label>
+    <label>Map style<select name="map_style"><option value="political_relief">Political relief</option><option value="natural_earth">Natural Earth</option><option value="blue_marble">NASA Blue Marble</option><option value="blue_marble_lights">NASA Blue Marble + night lights</option></select></label>
+    <label>Map center<select name="map_center"><option value="greenwich">Greenwich</option><option value="shack">Shack</option><option value="terminator">Terminator (solar-fixed)</option></select></label>
+    <label><input name="stretch_backgrounds" type="checkbox"> Stretch map to fill screen</label>
+    <label>Terminator<select name="terminator_mode"><option value="civil_twilight">Civil twilight</option><option value="hard">Hard edge</option></select></label>
+    <label>Night intensity<input name="night_intensity" type="range" min="0" max="1" step="0.01"></label>
+    <label><input name="timezone_visible" type="checkbox"> Show timezone boundaries and labels</label>
+    <label>Timezone boundaries<select name="timezone_style"><option value="idealized">Idealized 15° bands</option><option value="political">Political UTC boundaries</option></select></label>
+    <label><input name="wspr_visible" type="checkbox"> Show WSPR receptions</label>
+    <label>WSPR band<select name="wspr_band"><option value="all">All bands</option><option value="160m">160 m</option><option value="80m">80 m</option><option value="40m">40 m</option><option value="20m">20 m</option><option value="15m">15 m</option><option value="10m">10 m</option></select></label>
+    <label>WSPR pin persistence (minutes)<input name="wspr_persistence_minutes" type="number" min="5" max="180" step="5"></label>
+    <label>WSPR timeline<select name="wspr_mode"><option value="live">Live</option><option value="historical">Historical playback</option></select></label>
+    <label data-history>History window<select name="history_hours"><option value="6">6 hours</option><option value="12">12 hours</option><option value="24">24 hours</option><option value="48">48 hours</option></select></label>
+    <label data-history>Playback duration (seconds)<input name="playback_duration_seconds" type="number" min="30" max="3600" step="30"></label>
+    <label data-history><input name="playback_loop" type="checkbox"> Loop historical playback</label>
+    <div class="playback-actions" data-history><button type="button" id="play-pause">Pause playback</button><button type="button" id="restart-playback">Restart playback</button></div>
+    <button type="submit">Save global settings</button><output class="message" id="message"></output>
+  </form>
+</main><script type="module">
+  import { connectState, saveState } from "/assets/app.js";
+  import { playbackProgress } from "/assets/timeline.js";
+  import { PRESETS, applyPreset } from "/assets/presets.js";
+  const form = document.querySelector("#form"); const message = document.querySelector("#message"); const playPause = document.querySelector("#play-pause"); let state;
+  const updateControls = () => { const historical = form.elements.wspr_mode.value === "historical"; document.querySelectorAll("[data-history]").forEach(element => { element.classList.toggle("disabled", !historical); element.querySelectorAll("input,select,button").forEach(control => control.disabled = !historical); }); };
+  connectState(next => { state = next; for (const [key, value] of Object.entries(next)) { const field = form.elements.namedItem(key); if (!field) continue; field.type === "checkbox" ? field.checked = value : field.value = value; } playPause.textContent = state.playback_running ? "Pause playback" : "Resume playback"; updateControls(); });
+  form.elements.wspr_mode.addEventListener("change", updateControls);
+  const presetContainer = document.querySelector("#presets");
+  for (const preset of PRESETS) { const button = document.createElement("button"); button.type = "button"; button.textContent = preset.label; button.addEventListener("click", async () => { message.textContent = `Applying ${preset.label}…`; try { await saveState(applyPreset(state, preset.id)); message.textContent = `${preset.label} applied to all displays.`; } catch (error) { message.textContent = error.message; } }); presetContainer.append(button); }
+  form.addEventListener("submit", async event => { event.preventDefault(); message.textContent = "Saving…";
+    const data = new FormData(form); const next = { ...state };
+    for (const name of ["receiver_callsign", "shack_locator", "map_style", "map_center", "terminator_mode", "timezone_style", "wspr_band", "wspr_mode"]) next[name] = data.get(name);
+    next.night_intensity = Number(data.get("night_intensity")); next.timezone_visible = data.has("timezone_visible"); next.stretch_backgrounds = data.has("stretch_backgrounds");
+    next.wspr_visible = data.has("wspr_visible"); next.wspr_persistence_minutes = Number(data.get("wspr_persistence_minutes"));
+    if (next.wspr_mode === "historical") {
+      next.history_hours = Number(data.get("history_hours")); next.playback_duration_seconds = Number(data.get("playback_duration_seconds")); next.playback_loop = data.has("playback_loop");
+    }
+    if (next.wspr_mode === "historical" && state.wspr_mode !== "historical") { next.playback_started_at = new Date().toISOString(); next.playback_position = 0; next.playback_running = true; }
+    try { await saveState(next); message.textContent = "Saved and synchronized."; } catch (error) { message.textContent = error.message; }
+  });
+  playPause.addEventListener("click", async () => { const next = { ...state };
+    if (state.playback_running) { next.playback_position = playbackProgress(state); next.playback_running = false; }
+    else { next.playback_started_at = new Date().toISOString(); next.playback_running = true; }
+    try { await saveState(next); } catch (error) { message.textContent = error.message; }
+  });
+  document.querySelector("#restart-playback").addEventListener("click", async () => { const next = { ...state, playback_position: 0, playback_started_at: new Date().toISOString(), playback_running: true };
+    try { await saveState(next); } catch (error) { message.textContent = error.message; }
+  });
+</script></body></html>
