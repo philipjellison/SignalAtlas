@@ -21,17 +21,18 @@ body { margin: 0; }
 .config { max-width: 44rem; margin: 0 auto; padding: 2rem 1rem 4rem; }
 .config h1 { font-weight: 500; }
 .config h2 { font-size: 1rem; font-weight: 550; color: #c8d7e6; }
-.presets { margin: 1.5rem 0; padding: 1rem 1.25rem; background: #101d2c; border: 1px solid #263a50; border-radius: .8rem; }
-.presets div { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .55rem; }
-.presets > button { margin-top: .75rem; }
+.presets { display: grid; gap: .75rem; margin: 1.5rem 0; padding: 1rem 1.25rem; background: #101d2c; border: 1px solid #263a50; border-radius: .8rem; }
+.presets > #presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .55rem; }
+.presets > #preset-actions { margin: 0; }
 .presets button.selected { outline: 2px solid #8fe1a5; }
 form { display: grid; gap: 1rem; padding: 1.5rem; background: #101d2c; border: 1px solid #263a50; border-radius: .8rem; }
 label { display: grid; gap: .4rem; color: #bbcad9; }
+label:has(input[type="checkbox"]) { display: flex; align-items: center; gap: .55rem; }
 input, select, button { font: inherit; color: inherit; background: #08111f; border: 1px solid #40556b; border-radius: .35rem; padding: .65rem; }
-input[type="checkbox"] { justify-self: start; }
+input[type="checkbox"] { width: auto; padding: 0; }
 button { background: #1769aa; border-color: #2d84c7; cursor: pointer; }
 .message { min-height: 1.5em; color: #8fe1a5; }
-.playback-actions { display: flex; gap: .7rem; }
+.playback-actions { display: flex; gap: .75rem; }
 .playback-actions button { flex: 1; }
 .disabled { opacity: .42; }
 .webgl-display { background: #000; }

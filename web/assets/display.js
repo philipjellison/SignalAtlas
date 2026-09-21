@@ -550,12 +550,15 @@ function draw() {
       gl.disable(gl.BLEND);
     }
   }
-  gl.useProgram(shackProgram);
-  gl.bindVertexArray(shackVao);
-  gl.uniform2f(shackUniforms.location, shack.longitude, shack.latitude);
-  gl.uniform1f(shackUniforms.center, mapCenter);
-  gl.uniform1f(shackUniforms.scale, Math.max(0.75, canvas.width / 1920));
-  gl.drawArrays(gl.POINTS, 0, 1);
+  const shackVisible = state.station_name_visible || state.maidenhead_visible;
+  if (shackVisible) {
+    gl.useProgram(shackProgram);
+    gl.bindVertexArray(shackVao);
+    gl.uniform2f(shackUniforms.location, shack.longitude, shack.latitude);
+    gl.uniform1f(shackUniforms.center, mapCenter);
+    gl.uniform1f(shackUniforms.scale, Math.max(0.75, canvas.width / 1920));
+    gl.drawArrays(gl.POINTS, 0, 1);
+  }
   const shackScreen = solarFixedScreenPosition(shack.longitude, shack.latitude, mapCenter);
   stationName.textContent = state.receiver_callsign;
   stationName.hidden = !state.station_name_visible;
@@ -563,7 +566,7 @@ function draw() {
   if (state.station_name_visible) shackLabelParts.push(state.receiver_callsign);
   if (state.maidenhead_visible) shackLabelParts.push(state.shack_locator);
   shackLabel.textContent = shackLabelParts.join(" · ");
-  shackLabel.hidden = shackLabelParts.length === 0;
+  shackLabel.hidden = !shackVisible;
   shackLabel.style.left = `${shackScreen.x * 100}%`;
   shackLabel.style.top = `${currentMapLayout.top + shackScreen.y * currentMapLayout.height}px`;
   shackLabel.dataset.edge = shackScreen.x > 0.9 ? "right" : "left";

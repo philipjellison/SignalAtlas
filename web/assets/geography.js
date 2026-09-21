@@ -165,6 +165,7 @@ export class GeographyOverlay {
   }
 
   drawShackMarker() {
+    if (!this.state.station_name_visible && !this.state.maidenhead_visible) return;
     const ctx = this.context; const { width, height } = this.canvas;
     const point = shackScreenPosition(this.state, width, height);
     const scale = Math.max(0.75, width / 1920);

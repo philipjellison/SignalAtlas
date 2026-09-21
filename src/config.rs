@@ -179,7 +179,7 @@ impl ConfigStore {
         };
         config.validate()?;
         let store = Self { path, config };
-        store.persist().await?;
+        store.persist_config(&store.config).await?;
         Ok(store)
     }
 
@@ -189,17 +189,17 @@ impl ConfigStore {
 
     pub async fn replace(&mut self, mut config: DisplayConfig) -> anyhow::Result<DisplayConfig> {
         config.validate()?;
+        self.persist_config(&config).await?;
         self.config = config;
-        self.persist().await?;
         Ok(self.config.clone())
     }
 
-    async fn persist(&self) -> anyhow::Result<()> {
+    async fn persist_config(&self, config: &DisplayConfig) -> anyhow::Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent).await?;
         }
         let temporary = temporary_path(&self.path);
-        let bytes = serde_json::to_vec_pretty(&self.config)?;
+        let bytes = serde_json::to_vec_pretty(config)?;
         fs::write(&temporary, bytes)
             .await
             .context("write temporary configuration")?;
@@ -331,6 +331,22 @@ mod tests {
         store.replace(config).await.unwrap();
         let reloaded = ConfigStore::load(path).await.unwrap();
         assert_eq!(reloaded.get().map_style, MapStyle::BlueMarbleLights);
+    }
+
+    #[tokio::test]
+    async fn replace_persistence_failure_keeps_in_memory_configuration() {
+        let directory = tempfile::tempdir().unwrap();
+        let blocked_parent = directory.path().join("not-a-directory");
+        fs::write(&blocked_parent, b"blocked").await.unwrap();
+        let original = DisplayConfig::default();
+        let mut store = ConfigStore {
+            path: blocked_parent.join("config.json"),
+            config: original.clone(),
+        };
+        let mut candidate = original.clone();
+        candidate.map_style = MapStyle::BlueMarbleLights;
+        assert!(store.replace(candidate).await.is_err());
+        assert_eq!(store.get(), original);
     }
 
     #[test]

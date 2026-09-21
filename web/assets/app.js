@@ -11,7 +11,13 @@ export function connectState(onState, onStatus = () => {}) {
       window.clearTimeout(offlineTimer);
       onStatus("connected");
     });
-    socket.addEventListener("message", event => onState(JSON.parse(event.data)));
+    socket.addEventListener("message", event => {
+      try {
+        onState(JSON.parse(event.data));
+      } catch (error) {
+        console.error("Ignoring invalid SignalAtlas state message", error);
+      }
+    });
     socket.addEventListener("close", () => {
       if (stopped) return;
       onStatus("reconnecting");
