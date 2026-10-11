@@ -17,7 +17,7 @@ use tokio::{
 
 use crate::config::ConfigStore;
 use crate::config::DisplayConfig;
-use crate::config::WsprMode;
+use crate::config::{WsprMode, WsprScope};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WsprSpot {
@@ -35,6 +35,7 @@ pub struct WsprSpot {
 #[serde(default)]
 pub struct WsprSnapshot {
     pub receiver: String,
+    pub scope: WsprScope,
     pub fetched_at: Option<String>,
     pub stale: bool,
     pub error: Option<String>,
@@ -64,11 +65,25 @@ impl WsprSnapshot {
         fs::rename(PathBuf::from(temporary), path).await?;
         Ok(())
     }
+
+    pub fn pending(receiver: String, scope: WsprScope) -> Self {
+        Self {
+            receiver,
+            scope,
+            stale: true,
+            ..Self::default()
+        }
+    }
 }
 
 #[async_trait]
 pub trait WsprSource: Send + Sync {
-    async fn fetch(&self, receiver: &str, minutes: u16) -> anyhow::Result<Vec<WsprSpot>>;
+    async fn fetch(
+        &self,
+        scope: WsprScope,
+        receiver: &str,
+        minutes: u16,
+    ) -> anyhow::Result<Vec<WsprSpot>>;
 }
 
 pub struct WsprLiveSource {
@@ -93,23 +108,13 @@ struct ClickHouseResponse {
 
 #[async_trait]
 impl WsprSource for WsprLiveSource {
-    async fn fetch(&self, receiver: &str, minutes: u16) -> anyhow::Result<Vec<WsprSpot>> {
-        if receiver.is_empty()
-            || receiver.len() > 16
-            || !receiver
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || character == '/')
-        {
-            bail!("invalid receiver callsign")
-        }
-        let query = format!(
-            "SELECT toStartOfInterval(time, INTERVAL 2 MINUTE) AS latest_time, band, argMax(tx_sign, time) AS transmitter, \
-             tx_loc AS locator, argMax(tx_lat, time) AS latitude, argMax(tx_lon, time) AS longitude, \
-             argMax(snr, time) AS snr, count() AS receptions FROM wspr.rx \
-             WHERE rx_sign = '{receiver}' AND time > subtractMinutes(now(), {minutes}) \
-             AND tx_loc != '' AND tx_lat BETWEEN -90 AND 90 AND tx_lon BETWEEN -180 AND 180 \
-             GROUP BY latest_time, band, tx_loc ORDER BY latest_time DESC LIMIT 100000 FORMAT JSON"
-        );
+    async fn fetch(
+        &self,
+        scope: WsprScope,
+        receiver: &str,
+        minutes: u16,
+    ) -> anyhow::Result<Vec<WsprSpot>> {
+        let query = query_for(scope, receiver, minutes)?;
         let response = self
             .client
             .get(&self.endpoint)
@@ -123,6 +128,31 @@ impl WsprSource for WsprLiveSource {
         spots.retain(valid_spot);
         Ok(spots)
     }
+}
+
+fn query_for(scope: WsprScope, receiver: &str, minutes: u16) -> anyhow::Result<String> {
+    let receiver_filter = match scope {
+        WsprScope::Callsign => {
+            if receiver.is_empty()
+                || receiver.len() > 16
+                || !receiver
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '/')
+            {
+                bail!("invalid receiver callsign")
+            }
+            format!("rx_sign = '{receiver}' AND ")
+        }
+        WsprScope::Global => String::new(),
+    };
+    Ok(format!(
+        "SELECT toStartOfInterval(time, INTERVAL 2 MINUTE) AS latest_time, band, argMax(tx_sign, time) AS transmitter, \
+         tx_loc AS locator, argMax(tx_lat, time) AS latitude, argMax(tx_lon, time) AS longitude, \
+         argMax(snr, time) AS snr, count() AS receptions FROM wspr.rx \
+         WHERE {receiver_filter}time > subtractMinutes(now(), {minutes}) \
+         AND tx_loc != '' AND tx_lat BETWEEN -90 AND 90 AND tx_lon BETWEEN -180 AND 180 \
+         GROUP BY latest_time, band, tx_loc ORDER BY latest_time DESC LIMIT 100000 FORMAT JSON"
+    ))
 }
 
 fn valid_spot(spot: &WsprSpot) -> bool {
@@ -153,6 +183,7 @@ pub async fn run_poller(
             continue;
         }
         let receiver = current_config.receiver_callsign.clone();
+        let scope = current_config.wspr_scope;
         let minutes = requested_window(&current_config);
         {
             let current_snapshot = snapshot.read().await;
@@ -160,10 +191,15 @@ pub async fn run_poller(
                 continue;
             }
         }
-        match source.fetch(&receiver, minutes).await {
+        match source.fetch(scope, &receiver, minutes).await {
             Ok(spots) => {
+                let latest_config = config.lock().await.get();
+                if !request_matches_config(scope, &receiver, minutes, &latest_config) {
+                    continue;
+                }
                 let next = WsprSnapshot {
                     receiver,
+                    scope,
                     fetched_at: Some(Utc::now().to_rfc3339()),
                     stale: false,
                     error: None,
@@ -195,9 +231,22 @@ fn requested_window(config: &DisplayConfig) -> u16 {
 fn should_refresh(config: &DisplayConfig, snapshot: &WsprSnapshot) -> bool {
     config.wspr_mode == WsprMode::Live
         || snapshot.stale
-        || snapshot.receiver != config.receiver_callsign
+        || snapshot.scope != config.wspr_scope
+        || (config.wspr_scope == WsprScope::Callsign
+            && snapshot.receiver != config.receiver_callsign)
         || snapshot.window_minutes != requested_window(config)
         || snapshot.spots.is_empty()
+}
+
+fn request_matches_config(
+    scope: WsprScope,
+    receiver: &str,
+    minutes: u16,
+    config: &DisplayConfig,
+) -> bool {
+    scope == config.wspr_scope
+        && minutes == requested_window(config)
+        && (scope == WsprScope::Global || receiver == config.receiver_callsign)
 }
 
 #[cfg(test)]
@@ -232,6 +281,7 @@ mod tests {
         };
         let snapshot = WsprSnapshot {
             receiver: config.receiver_callsign.clone(),
+            scope: WsprScope::Callsign,
             window_minutes: 1440,
             spots: vec![WsprSpot {
                 latest_time: "2026-08-24 19:34:00".into(),
@@ -253,5 +303,89 @@ mod tests {
             },
             &snapshot
         ));
+    }
+
+    #[test]
+    fn scope_changes_invalidate_cached_results() {
+        let config = DisplayConfig::default();
+        let snapshot = WsprSnapshot {
+            receiver: config.receiver_callsign.clone(),
+            scope: WsprScope::Global,
+            window_minutes: requested_window(&config),
+            spots: vec![WsprSpot {
+                latest_time: "2026-08-24 19:34:00".into(),
+                band: 14,
+                transmitter: "W1AW".into(),
+                locator: "FN31".into(),
+                latitude: 41.5,
+                longitude: -72.7,
+                snr: -12,
+                receptions: 3,
+            }],
+            ..Default::default()
+        };
+        assert!(should_refresh(&config, &snapshot));
+    }
+
+    #[test]
+    fn query_scope_controls_receiver_filter() {
+        let station = query_for(WsprScope::Callsign, "K3LR", 180).unwrap();
+        assert!(station.contains("rx_sign = 'K3LR'"));
+        let global = query_for(WsprScope::Global, "K3LR", 180).unwrap();
+        assert!(!global.contains("rx_sign"));
+        assert!(global.contains("time > subtractMinutes(now(), 180)"));
+    }
+
+    #[test]
+    fn pending_snapshot_has_no_spots_from_the_previous_scope() {
+        let snapshot = WsprSnapshot::pending("K3LR".into(), WsprScope::Global);
+        assert_eq!(snapshot.scope, WsprScope::Global);
+        assert!(snapshot.stale);
+        assert!(snapshot.spots.is_empty());
+    }
+
+    #[test]
+    fn changed_scope_discards_an_in_flight_request() {
+        let config = DisplayConfig {
+            wspr_scope: WsprScope::Global,
+            ..Default::default()
+        };
+        assert!(!request_matches_config(
+            WsprScope::Callsign,
+            "K3LR",
+            180,
+            &config
+        ));
+    }
+
+    #[test]
+    fn snapshot_keeps_the_frontend_spot_shape() {
+        let snapshot = WsprSnapshot {
+            spots: vec![WsprSpot {
+                latest_time: "2026-08-24 19:34:00".into(),
+                band: 14,
+                transmitter: "W1AW".into(),
+                locator: "FN31".into(),
+                latitude: 41.5,
+                longitude: -72.7,
+                snr: -12,
+                receptions: 3,
+            }],
+            ..Default::default()
+        };
+        let value = serde_json::to_value(snapshot).unwrap();
+        let spot = &value["spots"][0];
+        for field in [
+            "latest_time",
+            "band",
+            "transmitter",
+            "locator",
+            "latitude",
+            "longitude",
+            "snr",
+            "receptions",
+        ] {
+            assert!(spot.get(field).is_some(), "missing {field}");
+        }
     }
 }

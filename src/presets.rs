@@ -9,7 +9,9 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-use crate::config::{DisplayConfig, MapCenter, MapStyle, TerminatorMode, TimezoneStyle, WsprMode};
+use crate::config::{
+    DisplayConfig, MapCenter, MapStyle, TerminatorMode, TimezoneStyle, WsprMode, WsprScope,
+};
 
 const PRESET_SCHEMA_VERSION: u32 = 1;
 const MAX_PRESET_NAME_LENGTH: usize = 80;
@@ -28,6 +30,8 @@ pub struct PresentationConfig {
     pub timezone_visible: bool,
     pub timezone_style: TimezoneStyle,
     pub wspr_visible: bool,
+    #[serde(default)]
+    pub wspr_scope: WsprScope,
     pub wspr_band: String,
     pub wspr_persistence_minutes: u16,
     pub wspr_mode: WsprMode,
@@ -49,6 +53,7 @@ impl PresentationConfig {
             timezone_visible: config.timezone_visible,
             timezone_style: config.timezone_style,
             wspr_visible: config.wspr_visible,
+            wspr_scope: config.wspr_scope,
             wspr_band: config.wspr_band.clone(),
             wspr_persistence_minutes: config.wspr_persistence_minutes,
             wspr_mode: config.wspr_mode,
@@ -69,6 +74,7 @@ impl PresentationConfig {
         config.timezone_visible = self.timezone_visible;
         config.timezone_style = self.timezone_style;
         config.wspr_visible = self.wspr_visible;
+        config.wspr_scope = self.wspr_scope;
         config.wspr_band = self.wspr_band.clone();
         config.wspr_persistence_minutes = self.wspr_persistence_minutes;
         config.wspr_mode = self.wspr_mode;

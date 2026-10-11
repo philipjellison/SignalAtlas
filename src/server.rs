@@ -102,6 +102,12 @@ async fn put_state(
         .replace(config)
         .await
         .map_err(ApiError)?;
+    {
+        let mut snapshot = state.wspr.write().await;
+        if snapshot.scope != config.wspr_scope {
+            *snapshot = WsprSnapshot::pending(config.receiver_callsign.clone(), config.wspr_scope);
+        }
+    }
     let _ = state.updates.send(config.clone());
     state.poll_notify.notify_one();
     Ok(Json(config))

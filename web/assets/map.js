@@ -31,7 +31,7 @@ export function maidenheadToCoordinates(locator) {
 }
 
 export function centerLongitudeFor(state) {
-  return state.map_center === "shack" ? maidenheadToCoordinates(state.shack_locator).longitude : 0;
+  return state.map_center === "shack" && state.shack_locator ? maidenheadToCoordinates(state.shack_locator).longitude : 0;
 }
 
 const palette = ["#f07a32", "#efbd32", "#68bd3f", "#24ad73", "#df5542", "#bd8737", "#e7cf55", "#31a5a0"];

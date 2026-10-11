@@ -8,7 +8,7 @@ use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-pub const CONFIG_SCHEMA_VERSION: u32 = 6;
+pub const CONFIG_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -26,6 +26,7 @@ pub struct DisplayConfig {
     pub timezone_visible: bool,
     pub timezone_style: TimezoneStyle,
     pub wspr_visible: bool,
+    pub wspr_scope: WsprScope,
     pub wspr_band: String,
     pub wspr_persistence_minutes: u16,
     pub wspr_mode: WsprMode,
@@ -80,12 +81,20 @@ pub enum WsprMode {
     Historical,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WsprScope {
+    #[default]
+    Callsign,
+    Global,
+}
+
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
-            receiver_callsign: "K3LR".into(),
-            shack_locator: "EN91SE".into(),
+            receiver_callsign: String::new(),
+            shack_locator: String::new(),
             station_name_visible: true,
             maidenhead_visible: true,
             map_style: MapStyle::PoliticalRelief,
@@ -96,6 +105,7 @@ impl Default for DisplayConfig {
             timezone_visible: true,
             timezone_style: TimezoneStyle::Idealized,
             wspr_visible: false,
+            wspr_scope: WsprScope::Callsign,
             wspr_band: "all".into(),
             wspr_persistence_minutes: 60,
             wspr_mode: WsprMode::Live,
@@ -117,10 +127,13 @@ impl DisplayConfig {
         if self.schema_version != CONFIG_SCHEMA_VERSION {
             bail!("unsupported configuration schema version")
         }
-        if self.receiver_callsign.is_empty() {
-            bail!("receiver callsign cannot be empty")
+        if self.wspr_visible
+            && self.wspr_scope == WsprScope::Callsign
+            && self.receiver_callsign.is_empty()
+        {
+            bail!("receiver callsign is required for My Station WSPR")
         }
-        if !is_six_character_locator(&self.shack_locator) {
+        if !self.shack_locator.is_empty() && !is_six_character_locator(&self.shack_locator) {
             bail!("shack locator must be a six-character Maidenhead locator")
         }
         if !(0.0..=1.0).contains(&self.night_intensity) {
@@ -129,6 +142,9 @@ impl DisplayConfig {
         const BANDS: &[&str] = &["all", "160m", "80m", "40m", "20m", "15m", "10m"];
         if !BANDS.contains(&self.wspr_band.as_str()) {
             bail!("unsupported WSPR band")
+        }
+        if self.wspr_scope == WsprScope::Global && self.wspr_mode == WsprMode::Historical {
+            bail!("global WSPR supports live display only")
         }
         if !(5..=180).contains(&self.wspr_persistence_minutes) {
             bail!("WSPR persistence must be between 5 and 180 minutes")
@@ -274,6 +290,17 @@ fn parse_and_migrate(bytes: &[u8]) -> anyhow::Result<DisplayConfig> {
         object.insert("station_name_visible".into(), true.into());
         object.insert("maidenhead_visible".into(), true.into());
     }
+    if value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        == Some(6)
+    {
+        let object = value
+            .as_object_mut()
+            .context("configuration must be a JSON object")?;
+        object.insert("schema_version".into(), CONFIG_SCHEMA_VERSION.into());
+        object.insert("wspr_scope".into(), "callsign".into());
+    }
     Ok(serde_json::from_value(value)?)
 }
 
@@ -288,11 +315,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_valid_and_project_specific() {
+    fn defaults_are_valid_with_no_station_identity() {
         let mut config = DisplayConfig::default();
         config.validate().unwrap();
-        assert_eq!(config.receiver_callsign, "K3LR");
-        assert_eq!(config.shack_locator, "EN91SE");
+        assert!(config.receiver_callsign.is_empty());
+        assert!(config.shack_locator.is_empty());
+        assert_eq!(config.wspr_scope, WsprScope::Callsign);
     }
 
     #[test]
@@ -311,6 +339,11 @@ mod tests {
     fn validation_rejects_invalid_locator_and_intensity() {
         let mut config = DisplayConfig {
             shack_locator: "NOTHERE".into(),
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+        let mut config = DisplayConfig {
+            wspr_visible: true,
             ..Default::default()
         };
         assert!(config.validate().is_err());
@@ -394,5 +427,27 @@ mod tests {
         assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
         assert!(migrated.station_name_visible);
         assert!(migrated.maidenhead_visible);
+        assert_eq!(migrated.wspr_scope, WsprScope::Callsign);
+    }
+
+    #[test]
+    fn migrates_configuration_without_wspr_scope() {
+        let mut previous = serde_json::to_value(DisplayConfig::default()).unwrap();
+        let object = previous.as_object_mut().unwrap();
+        object.insert("schema_version".into(), 6.into());
+        object.remove("wspr_scope");
+        let migrated = parse_and_migrate(&serde_json::to_vec(&previous).unwrap()).unwrap();
+        assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(migrated.wspr_scope, WsprScope::Callsign);
+    }
+
+    #[test]
+    fn rejects_global_historical_playback() {
+        let mut config = DisplayConfig {
+            wspr_scope: WsprScope::Global,
+            wspr_mode: WsprMode::Historical,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
     }
 }

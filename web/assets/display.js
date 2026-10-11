@@ -487,7 +487,7 @@ function draw() {
   const timestamp = displayTimestamp(state, snapshot, new Date());
   if (Math.abs(timestamp.getTime() - wsprSelectionUpdated) >= 5000) updateWsprBuffer(timestamp);
   const sun = solarPosition(timestamp);
-  const shack = maidenheadToCoordinates(state.shack_locator);
+  const shack = state.shack_locator ? maidenheadToCoordinates(state.shack_locator) : { longitude: 0, latitude: 0 };
   const mapCenter = centerLongitude(state, sun.longitude, shack.longitude);
   gl.useProgram(program);
   gl.bindVertexArray(mapVao);
@@ -550,7 +550,7 @@ function draw() {
       gl.disable(gl.BLEND);
     }
   }
-  const shackVisible = state.station_name_visible || state.maidenhead_visible;
+  const shackVisible = Boolean(state.shack_locator) && (state.station_name_visible || state.maidenhead_visible);
   if (shackVisible) {
     gl.useProgram(shackProgram);
     gl.bindVertexArray(shackVao);
@@ -561,10 +561,10 @@ function draw() {
   }
   const shackScreen = solarFixedScreenPosition(shack.longitude, shack.latitude, mapCenter);
   stationName.textContent = state.receiver_callsign;
-  stationName.hidden = !state.station_name_visible;
+  stationName.hidden = !state.station_name_visible || !state.receiver_callsign;
   const shackLabelParts = [];
-  if (state.station_name_visible) shackLabelParts.push(state.receiver_callsign);
-  if (state.maidenhead_visible) shackLabelParts.push(state.shack_locator);
+  if (state.station_name_visible && state.receiver_callsign) shackLabelParts.push(state.receiver_callsign);
+  if (state.maidenhead_visible && state.shack_locator) shackLabelParts.push(state.shack_locator);
   shackLabel.textContent = shackLabelParts.join(" · ");
   shackLabel.hidden = !shackVisible;
   shackLabel.style.left = `${shackScreen.x * 100}%`;

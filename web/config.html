@@ -4,8 +4,8 @@
 <body><main class="config"><h1>SignalAtlas Configuration</h1><p>Changes here are global and appear on every connected display.</p>
   <section class="presets"><h2>Presentation presets</h2><div id="presets"></div><button type="button" id="save-preset">Save current as preset</button><div class="playback-actions" id="preset-actions" hidden><button type="button" id="update-preset">Update</button><button type="button" id="rename-preset">Rename</button><button type="button" id="delete-preset">Delete</button></div></section>
   <form id="form">
-    <label>Receiver callsign<input name="receiver_callsign" required></label>
-    <label>Shack Maidenhead locator<input name="shack_locator" minlength="6" maxlength="6" required></label>
+    <label>Receiver callsign<input name="receiver_callsign"></label>
+    <label>Shack Maidenhead locator<input name="shack_locator" minlength="6" maxlength="6"></label>
     <label><input name="station_name_visible" type="checkbox"> Show station name</label>
     <label><input name="maidenhead_visible" type="checkbox"> Show Maidenhead locator</label>
     <label>Map style<select name="map_style"><option value="political_relief">Political relief</option><option value="natural_earth">Natural Earth</option><option value="blue_marble">NASA Blue Marble</option><option value="blue_marble_lights">NASA Blue Marble + night lights</option></select></label>
@@ -16,6 +16,8 @@
     <label><input name="timezone_visible" type="checkbox"> Show timezone boundaries and labels</label>
     <label>Timezone boundaries<select name="timezone_style"><option value="idealized">Idealized 15° bands</option><option value="political">Political UTC boundaries</option></select></label>
     <label><input name="wspr_visible" type="checkbox"> Show WSPR receptions</label>
+    <label>WSPR source<select name="wspr_scope"><option value="callsign">My Station</option><option value="global">Global</option></select></label>
+    <p class="message" data-global-history hidden>Global WSPR currently supports live display only. Historical playback remains available with My Station.</p>
     <label>WSPR band<select name="wspr_band"><option value="all">All bands</option><option value="160m">160 m</option><option value="80m">80 m</option><option value="40m">40 m</option><option value="20m">20 m</option><option value="15m">15 m</option><option value="10m">10 m</option></select></label>
     <label>WSPR pin persistence (minutes)<input name="wspr_persistence_minutes" type="number" min="5" max="180" step="5"></label>
     <label>WSPR timeline<select name="wspr_mode"><option value="live">Live</option><option value="historical">Historical playback</option></select></label>
@@ -29,9 +31,10 @@
   import { connectState, saveState } from "/assets/app.js";
   import { playbackProgress } from "/assets/timeline.js";
   const form = document.querySelector("#form"); const message = document.querySelector("#message"); const playPause = document.querySelector("#play-pause"); const presetContainer = document.querySelector("#presets"); const presetActions = document.querySelector("#preset-actions"); let state; let presets = []; let selectedPresetId = null;
-  const updateControls = () => { const historical = form.elements.wspr_mode.value === "historical"; document.querySelectorAll("[data-history]").forEach(element => { element.classList.toggle("disabled", !historical); element.querySelectorAll("input,select,button").forEach(control => control.disabled = !historical); }); };
+  const updateControls = () => { const global = form.elements.wspr_scope.value === "global"; if (global) form.elements.wspr_mode.value = "live"; const historical = !global && form.elements.wspr_mode.value === "historical"; form.elements.wspr_mode.querySelector('option[value="historical"]').disabled = global; document.querySelector("[data-global-history]").hidden = !global; document.querySelectorAll("[data-history]").forEach(element => { element.classList.toggle("disabled", !historical); element.querySelectorAll("input,select,button").forEach(control => control.disabled = !historical); }); };
   connectState(next => { state = next; for (const [key, value] of Object.entries(next)) { const field = form.elements.namedItem(key); if (!field) continue; field.type === "checkbox" ? field.checked = value : field.value = value; } playPause.textContent = state.playback_running ? "Pause playback" : "Resume playback"; updateControls(); });
   form.elements.wspr_mode.addEventListener("change", updateControls);
+  form.elements.wspr_scope.addEventListener("change", updateControls);
   const presetRequest = async (url, options = {}) => {
     const response = await fetch(url, options); const body = response.status === 204 ? null : await response.json();
     if (!response.ok) throw new Error(body?.error || "Unable to update presets"); return body;
@@ -51,7 +54,7 @@
   loadPresets();
   form.addEventListener("submit", async event => { event.preventDefault(); message.textContent = "Saving…";
     const data = new FormData(form); const next = { ...state };
-    for (const name of ["receiver_callsign", "shack_locator", "map_style", "map_center", "terminator_mode", "timezone_style", "wspr_band", "wspr_mode"]) next[name] = data.get(name);
+    for (const name of ["receiver_callsign", "shack_locator", "map_style", "map_center", "terminator_mode", "timezone_style", "wspr_scope", "wspr_band", "wspr_mode"]) next[name] = data.get(name);
     next.night_intensity = Number(data.get("night_intensity")); next.timezone_visible = data.has("timezone_visible"); next.stretch_backgrounds = data.has("stretch_backgrounds");
     next.station_name_visible = data.has("station_name_visible"); next.maidenhead_visible = data.has("maidenhead_visible");
     next.wspr_visible = data.has("wspr_visible"); next.wspr_persistence_minutes = Number(data.get("wspr_persistence_minutes"));

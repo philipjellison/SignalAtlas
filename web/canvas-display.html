@@ -9,7 +9,7 @@
       <canvas id="wspr" aria-label="Recently received WSPR transmitter locations"></canvas>
       <canvas id="geography" aria-label="UTC timezone grid and shack location"></canvas>
     </div>
-    <div class="info-bar info-top"><span aria-hidden="true"></span><strong id="station-name">K3LR · EN91SE</strong><time id="utc-time">UTC</time></div>
+    <div class="info-bar info-top"><span aria-hidden="true"></span><strong id="station-name" hidden></strong><time id="utc-time">UTC</time></div>
     <div class="map-caption"><strong id="style-name">Loading map…</strong><span id="center-name"></span></div>
   </main>
   <span class="status" id="status">connecting</span>
@@ -37,11 +37,15 @@
       geography.setState(state);
       wspr.setState(state);
       mapFrame.classList.toggle("stretch-map", state.stretch_backgrounds);
-      stationName.textContent = state.receiver_callsign;
-      stationName.hidden = !state.station_name_visible;
+      const configuredStationParts = [state.receiver_callsign, state.shack_locator].filter(Boolean);
+      const stationParts = [];
+      if (state.station_name_visible && state.receiver_callsign) stationParts.push(state.receiver_callsign);
+      if (state.maidenhead_visible && state.shack_locator) stationParts.push(state.shack_locator);
+      stationName.textContent = stationParts.join(" · ");
+      stationName.hidden = stationParts.length === 0;
       const styleNames = { political_relief: "Political Relief", natural_earth: "Natural Earth", blue_marble: "NASA Blue Marble", blue_marble_lights: "NASA Blue Marble + Night Lights" };
       styleName.textContent = styleNames[state.map_style] || "World Map";
-      centerName.textContent = state.map_center === "shack" ? `${state.receiver_callsign} · ${state.shack_locator} centered` : state.map_center === "terminator" ? "Terminator centered (WebGL)" : "Greenwich centered";
+      centerName.textContent = state.map_center === "shack" && state.shack_locator ? `${configuredStationParts.join(" · ")} centered` : state.map_center === "terminator" ? "Terminator centered (WebGL)" : "Greenwich centered";
     }, connection => {
       const labels = { connected: "connected", reconnecting: "reconnecting…", offline: "offline · cached display" };
       status.textContent = labels[connection] || connection;

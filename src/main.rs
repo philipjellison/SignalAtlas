@@ -6,7 +6,7 @@ mod wspr;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use anyhow::Context;
-use config::ConfigStore;
+use config::{ConfigStore, WsprScope};
 use presets::PresetStore;
 use server::AppState;
 use tokio::net::TcpListener;
@@ -46,7 +46,14 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "https://db1.wspr.live/".into());
     let store = ConfigStore::load(config_path).await?;
     let presets = PresetStore::load(preset_path).await?;
-    let snapshot = WsprSnapshot::load(&cache_path).await;
+    let config = store.get();
+    let mut snapshot = WsprSnapshot::load(&cache_path).await;
+    if snapshot.scope != config.wspr_scope
+        || (config.wspr_scope == WsprScope::Callsign
+            && snapshot.receiver != config.receiver_callsign)
+    {
+        snapshot = WsprSnapshot::pending(config.receiver_callsign.clone(), config.wspr_scope);
+    }
     let state = AppState::new(store, presets, snapshot);
     let source = Arc::new(WsprLiveSource::new(endpoint)?);
     tokio::spawn(wspr::run_poller(
