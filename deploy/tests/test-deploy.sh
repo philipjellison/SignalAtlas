@@ -34,6 +34,12 @@ cat > "$stubs/systemctl" <<'S'
 echo "systemctl $*" >> "$STUB_LOG"
 exit 0
 S
+cat > "$stubs/systemctl" <<'S'
+#!/bin/sh
+echo "systemctl $*" >> "$STUB_LOG"
+if [ -n "${FAIL_SYSTEMCTL_DISABLE:-}" ] && [ "$1" = disable ]; then exit 1; fi
+exit 0
+S
 cat > "$stubs/mv" <<'S'
 #!/bin/sh
 # Simulated failure of the atomic symlink switch (mv -T) when FAIL_MV_T is set.
@@ -153,6 +159,54 @@ make_prefix "$sa"; mkdir -p "$tmp/home/.config/labwc"
 printf 'other &\n%s/bin/signalatlas-kiosk &\n/opt/other/bin/signalatlas-kiosk &\n' "$sa" > "$tmp/home/.config/labwc/autostart"
 run_uninstall "$sa" >/dev/null 2>&1
 eq "only matching kiosk line removed" "$(tr '\n' '|' < "$tmp/home/.config/labwc/autostart")" "other &|/opt/other/bin/signalatlas-kiosk &|"
+
+# Stopping the matching service fails: abort with nothing removed.
+make_prefix "$sa"; unit_for "$tmp/fake.service" "$sa/bin/signalatlas"; : > "$STUB_LOG"
+check_not "failed service stop aborts uninstall" env FAIL_SYSTEMCTL_DISABLE=1 bash -c 'HOME="$1" XDG_CONFIG_HOME="$1/.config" SIGNALATLAS_UNIT_PATH="$2" "$3/deploy/uninstall.sh" --prefix "$4"' _ "$tmp/home" "$tmp/fake.service" "$repo" "$sa"
+check "failed stop: unit kept" test -f "$tmp/fake.service"
+check "failed stop: binary kept" test -f "$sa/bin/signalatlas"
+check "failed stop: web kept" test -f "$sa/web/display.html"
+check_not "failed stop: unit not deleted via rm" grep -q "sudo rm" "$STUB_LOG"
+check "retry after failure succeeds" run_uninstall "$sa"
+check "retry removed unit" test ! -e "$tmp/fake.service"
+
+# Legacy web backups survive uninstall; releases and symlink do not.
+sb="$tmp/withbackup"; make_prefix "$sb"; rm -rf "$sb/web"
+mkdir -p "$sb/web-releases/legacy-20200101000000-1" "$sb/web-releases/r-20240101000000-2"
+echo user > "$sb/web-releases/legacy-20200101000000-1/custom.txt"
+echo new > "$sb/web-releases/r-20240101000000-2/display.html"
+ln -s web-releases/r-20240101000000-2 "$sb/web"
+rm -f "$tmp/fake.service"
+check "uninstall with legacy backup succeeds" run_uninstall "$sb"
+check "legacy backup preserved" test -f "$sb/web-releases/legacy-20200101000000-1/custom.txt"
+check "release removed" test ! -e "$sb/web-releases/r-20240101000000-2"
+check "web symlink removed" test ! -e "$sb/web" -a ! -L "$sb/web"
+check "binary removed" test ! -e "$sb/bin/signalatlas"
+
+echo "install-service.sh"
+run_install_service() { # <prefix> [args]
+  local prefix="$1"; shift
+  SIGNALATLAS_UNIT_PATH="$tmp/fake.service" "$repo/deploy/install-service.sh" --prefix "$prefix" "$@"
+}
+sc="$tmp/svc-a"; sd="$tmp/svc-b"; make_prefix "$sc"; make_prefix "$sd"; chmod +x "$sc/bin/signalatlas" "$sd/bin/signalatlas"
+rm -f "$tmp/fake.service"; : > "$STUB_LOG"
+check "fresh unit install" run_install_service "$sc"
+check "unit written for prefix" grep -q "ExecStart=$sc/bin/signalatlas" "$tmp/fake.service"
+check_not "install only: no enable/start" grep -Eq "systemctl (enable|start)" "$STUB_LOG"
+check "re-install over own unit" run_install_service "$sc"
+cp "$tmp/fake.service" "$tmp/fake.before"
+check_not "refuses to overwrite another prefix's unit" run_install_service "$sd"
+check "other-prefix unit unchanged" cmp -s "$tmp/fake.service" "$tmp/fake.before"
+printf 'ExecStart=/bin/true\n' >> "$tmp/fake.service"; cp "$tmp/fake.service" "$tmp/fake.before"
+check_not "refuses to overwrite ambiguous unit" run_install_service "$sc"
+check "ambiguous unit unchanged" cmp -s "$tmp/fake.service" "$tmp/fake.before"
+cat > "$tmp/fake.service" <<U
+[Service]
+ExecStart=$sc/bin/signalatlas
+U
+check "upgrades a previous-version style unit" run_install_service "$sc"
+check "upgraded unit has new settings" grep -q SIGNALATLAS_WEB "$tmp/fake.service"
+rm -f "$tmp/fake.service"
 
 echo "publish_web"
 src="$tmp/src"; mkdir -p "$src/assets"; echo v1 > "$src/display.html"; echo a > "$src/assets/a.js"

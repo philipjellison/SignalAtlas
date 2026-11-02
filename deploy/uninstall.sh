@@ -44,7 +44,8 @@ case "$ownership" in
     info "$SERVICE_NAME belongs to a different installation; leaving it unchanged." ;;
   match)
     if command -v systemctl >/dev/null; then
-      priv systemctl disable --now "$SERVICE_NAME" || info "Warning: could not disable/stop $SERVICE_NAME"
+      priv systemctl disable --now "$SERVICE_NAME" \
+        || die "could not stop/disable $SERVICE_NAME; nothing was removed. Fix the problem (see: systemctl status signalatlas) and retry."
     fi
     priv rm -f "$UNIT_PATH"
     if command -v systemctl >/dev/null; then priv systemctl daemon-reload; fi
@@ -68,3 +69,6 @@ if [[ -d "$PREFIX/bin" ]]; then maybe_priv "$PREFIX" rmdir --ignore-fail-on-non-
 if [[ -d "$PREFIX" ]]; then maybe_priv "$PREFIX" rmdir --ignore-fail-on-non-empty "$PREFIX"; fi
 
 info "Removed application files under $PREFIX. User data was preserved."
+if compgen -G "$PREFIX/web-releases/legacy-*" >/dev/null; then
+  info "Kept previous web asset backups in $PREFIX/web-releases/ (delete them manually if unwanted)."
+fi

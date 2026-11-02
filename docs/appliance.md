@@ -88,7 +88,7 @@ Previously installed units that lack the new variables still work: the executabl
 
 `install.sh` stores each version of the web files under `<prefix>/web-releases/r-<timestamp>-<pid>/` and points `<prefix>/web` (a symlink) at the active one, switching it with an atomic rename. The `web` path therefore stays valid during upgrades, and a failed upgrade leaves the previous assets active. The newest two releases are kept; older `r-*` directories are pruned. Nothing else in `web-releases/` is deleted.
 
-Installations from earlier versions have `web` as a real directory. The first upgrade moves it to `web-releases/legacy-<timestamp>-<pid>/` (kept, including any files you added) and creates the symlink. This one step cannot be atomic on Linux: for the space of two commands `web` does not exist. If the installer is killed in that window, rerun `./deploy/install.sh` (it restores the legacy directory first), or recover by hand:
+Installations from earlier versions have `web` as a real directory. The first upgrade moves it to `web-releases/legacy-<timestamp>-<pid>/` (kept, including any files you added, even after uninstall) and creates the symlink. This one step cannot be atomic on Linux: for the space of two commands `web` does not exist. If the installer is killed in that window, rerun `./deploy/install.sh` (it restores the legacy directory first), or recover by hand:
 
 ```sh
 mv /opt/signalatlas/web-releases/legacy-<newest> /opt/signalatlas/web
@@ -109,7 +109,9 @@ The systemd service is stopped, disabled and removed only when `/etc/systemd/sys
 - `uninstall.sh --prefix ~/signalatlas` leaves a service installed for `/opt/signalatlas` untouched.
 - If ownership cannot be determined (symlinked unit, drop-in that sets `ExecStart`, several or relative `ExecStart` lines), the script stops before changing anything. Use `--keep-service` to remove only the files and handle the service yourself.
 
-`install-service.sh` writes the single system-wide `signalatlas.service`; installing it for a second prefix replaces the first.
+`install-service.sh` writes the single system-wide `signalatlas.service`. It replaces an existing unit only if that unit already belongs to the same prefix (or none exists); otherwise it stops without changes. To move the service to another prefix, run `uninstall.sh` for the old one first.
+
+If stopping or disabling the matching service fails, `uninstall.sh` aborts and removes nothing; fix the problem and rerun it. Web asset backups in `web-releases/legacy-*` are never deleted by the uninstaller, so any files you added to an old `web` directory survive; remove them manually when no longer needed.
 
 ## Tests
 

@@ -164,14 +164,15 @@ publish_web() {
   return 0
 }
 
-# Remove everything publish_web created, plus a legacy web directory.
+# Remove the web assets publish_web created (symlink and r-* releases) and an
+# old-style web directory. Backups under web-releases/legacy-* are preserved.
 remove_web() {
   local prefix="$1"
   [[ -d "$prefix" ]] || return 0
   local run=(maybe_priv "$prefix")
   "${run[@]}" rm -rf "$prefix/web" "$prefix/web.new" "$prefix/web.old"
   if [[ -d "$prefix/web-releases" ]]; then
-    "${run[@]}" find "$prefix/web-releases" -maxdepth 1 \( -name 'r-*' -o -name 'legacy-*' -o -name '.staging-*' \) -exec rm -rf {} +
+    "${run[@]}" find "$prefix/web-releases" -maxdepth 1 \( -name 'r-*' -o -name '.staging-*' \) -exec rm -rf {} +
     "${run[@]}" rmdir --ignore-fail-on-non-empty "$prefix/web-releases"
   fi
   "${run[@]}" find "$prefix" -maxdepth 1 -name '.web.tmp-*' -exec rm -f {} +

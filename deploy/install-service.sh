@@ -17,6 +17,7 @@ Installs $UNIT_PATH for an application already installed by deploy/install.sh.
   --enable      also enable the service at boot (systemctl enable)
   --start       also start the service now (systemctl start)
 
+An existing unit is only replaced if it already belongs to this prefix.
 Without --enable or --start the unit is only installed. Re-running updates the
 unit file and reloads systemd but never changes whether an existing service is
 enabled or running; restart it yourself to apply an update.
@@ -39,6 +40,13 @@ check_prefix
 command -v systemctl >/dev/null || die "systemd (systemctl) is not available on this system"
 [[ -x "$PREFIX/bin/signalatlas" && -d "$PREFIX/web" ]] \
   || die "SignalAtlas is not installed under $PREFIX; run deploy/install.sh first"
+
+# Never overwrite a unit that belongs to a different installation.
+case "$(service_ownership "$UNIT_PATH" "$PREFIX")" in
+  none | match) ;;
+  other) die "$UNIT_PATH belongs to a different installation (its ExecStart is not $PREFIX/bin/signalatlas). Nothing was changed. Run deploy/uninstall.sh for that installation first." ;;
+  *) die "cannot tell whether the existing $UNIT_PATH belongs to $PREFIX (symlink, drop-in, or unusual ExecStart). Nothing was changed." ;;
+esac
 
 unit="$(mktemp)"
 trap 'rm -f -- "$unit"' EXIT
