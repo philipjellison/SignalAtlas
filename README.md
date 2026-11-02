@@ -70,10 +70,17 @@ This is the primary way to run SignalAtlas. It needs no service, no root access 
    cargo build --locked --release
    ```
 
-5. **Start SignalAtlas.** It can be started from any directory.
+5. **Start SignalAtlas.**
 
    ```sh
    ./target/release/signalatlas
+   ```
+
+   The relative path above only works while your current directory is the repository. SignalAtlas itself does not care where it is started: use the absolute path to run it from anywhere, for example:
+
+   ```sh
+   cd ~
+   ~/SignalAtlas/target/release/signalatlas
    ```
 
 6. **Open the interface** in a browser: the display is at <http://localhost:3000/> and the configuration page at <http://localhost:3000/config>. From another computer use `http://HOSTNAME:3000/`.
@@ -189,7 +196,7 @@ git pull
 - **systemd service:** `./deploy/install.sh && ./deploy/install-service.sh && sudo systemctl restart signalatlas`. Updating does not change whether the service is enabled or running; the restart applies the new version.
 - **Kiosk:** update as for the service; the kiosk entry does not need to be reinstalled. Reboot, or press F5 in the kiosk, to load the new web files.
 
-To remove SignalAtlas: `./deploy/uninstall.sh` (removes the service unit, kiosk entry, and installed files; keeps your data).
+To remove SignalAtlas: `./deploy/uninstall.sh` (add `--prefix DIR` if you used one). It removes the installed files and this user's kiosk entry, and removes the systemd service only if that service runs the copy being removed; your data is kept.
 
 ## Troubleshooting
 
@@ -215,7 +222,7 @@ To remove SignalAtlas: `./deploy/uninstall.sh` (removes the service unit, kiosk 
 - [docs/webgl-renderer.md](docs/webgl-renderer.md) — the WebGL2 renderer.
 - [docs/performance-report-rpi4.md](docs/performance-report-rpi4.md) — Raspberry Pi 4 measurements.
 
-Browser-side tests: `node --test web/assets/*.test.mjs`. Rust checks: `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`.
+Browser-side tests: `node --test web/assets/*.test.mjs`. Deployment-script tests (temporary directories only): `bash deploy/tests/test-deploy.sh`. Rust checks: `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`.
 
 ## License
 

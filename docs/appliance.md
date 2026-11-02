@@ -70,7 +70,7 @@ Without the service, the data directory defaults as described in the README (`~/
 
 Installations made with the earlier all-in-one `install.sh` (service enabled, kiosk entry present) keep working unchanged:
 
-- `./deploy/install.sh` replaces the executable, launcher, and web files in `/opt/signalatlas` and does not touch the unit, so a running service keeps running its previous executable until restarted. It prints a reminder when the service is active.
+- `./deploy/install.sh` replaces the executable and launcher, and publishes the web files (see *Web asset layout*; an existing `web` directory is converted on first upgrade) in `/opt/signalatlas` and does not touch the unit, so a running service keeps running its previous executable until restarted. It prints a reminder when the service is active.
 - `./deploy/install-service.sh` refreshes the unit file (it adds `SIGNALATLAS_WEB` and `SIGNALATLAS_DATA_DIR`, which match the old defaults) and reloads systemd. It does not enable, disable, start, or stop anything. Run `sudo systemctl restart signalatlas` to apply it.
 - The kiosk autostart line is identical to the old one, so `install-kiosk.sh` does not need to be re-run.
 
@@ -84,10 +84,33 @@ Previously installed units that lack the new variables still work: the executabl
 - A running display keeps its loaded map and astronomy layers if Wi-Fi or Internet is lost. If it loses the local service it reports `reconnecting…`, then `offline · cached display`, and reconnects automatically.
 - Live WSPR refreshes every two minutes. Historical windows are fetched once per receiver/window and replayed locally. The last successful response is cached; provider failures keep those pins and mark them as cached.
 
+## Web asset layout
+
+`install.sh` stores each version of the web files under `<prefix>/web-releases/r-<timestamp>-<pid>/` and points `<prefix>/web` (a symlink) at the active one, switching it with an atomic rename. The `web` path therefore stays valid during upgrades, and a failed upgrade leaves the previous assets active. The newest two releases are kept; older `r-*` directories are pruned. Nothing else in `web-releases/` is deleted.
+
+Installations from earlier versions have `web` as a real directory. The first upgrade moves it to `web-releases/legacy-<timestamp>-<pid>/` (kept, including any files you added) and creates the symlink. This one step cannot be atomic on Linux: for the space of two commands `web` does not exist. If the installer is killed in that window, rerun `./deploy/install.sh` (it restores the legacy directory first), or recover by hand:
+
+```sh
+mv /opt/signalatlas/web-releases/legacy-<newest> /opt/signalatlas/web
+```
+
+If the installer cannot publish new assets it reports an error and keeps the previous ones. Do not edit files inside `web/`; they are replaced by upgrades.
+
 ## Removal
 
 ```sh
-./deploy/uninstall.sh
+./deploy/uninstall.sh [--prefix DIR] [--keep-service]
 ```
 
-This stops and removes the service (if installed), removes this user's kiosk autostart line, and deletes the installed files under the prefix. Data in `/var/lib/signalatlas` is preserved.
+The script deletes the files installed under the prefix and this user's kiosk autostart line for that prefix. Data in `/var/lib/signalatlas` and `~/.local/share/signalatlas` is preserved.
+
+The systemd service is stopped, disabled and removed only when `/etc/systemd/system/signalatlas.service` has a single `ExecStart` equal to `<prefix>/bin/signalatlas`. Units from earlier versions (`/opt/signalatlas/bin/signalatlas`) are recognized this way. Consequences:
+
+- `uninstall.sh --prefix ~/signalatlas` leaves a service installed for `/opt/signalatlas` untouched.
+- If ownership cannot be determined (symlinked unit, drop-in that sets `ExecStart`, several or relative `ExecStart` lines), the script stops before changing anything. Use `--keep-service` to remove only the files and handle the service yourself.
+
+`install-service.sh` writes the single system-wide `signalatlas.service`; installing it for a second prefix replaces the first.
+
+## Tests
+
+`bash deploy/tests/test-deploy.sh` exercises the service-ownership check, the web publish/rollback logic, and the install and uninstall scripts. It runs in a temporary directory with stub `sudo`/`systemctl` and a fake unit file, so it never touches real systemd or `/opt`.

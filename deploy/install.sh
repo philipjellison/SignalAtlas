@@ -40,24 +40,14 @@ if [[ $build -eq 1 ]]; then
 fi
 [[ -x target/release/signalatlas ]] || die "target/release/signalatlas not found; run without --no-build"
 
-stage="$(mktemp -d)"
-trap 'rm -rf -- "$stage"' EXIT
-cp -a web "$stage/web"
-
 maybe_priv "$PREFIX" install -d -m 0755 "$PREFIX" "$PREFIX/bin"
 # Install via a temporary name and rename so a running binary is replaced atomically.
 maybe_priv "$PREFIX" install -m 0755 target/release/signalatlas "$PREFIX/bin/.signalatlas.new"
 maybe_priv "$PREFIX" mv -f "$PREFIX/bin/.signalatlas.new" "$PREFIX/bin/signalatlas"
 maybe_priv "$PREFIX" install -m 0755 deploy/signalatlas-kiosk "$PREFIX/bin/.signalatlas-kiosk.new"
 maybe_priv "$PREFIX" mv -f "$PREFIX/bin/.signalatlas-kiosk.new" "$PREFIX/bin/signalatlas-kiosk"
-# Replace web assets as a unit so files removed upstream do not linger.
-maybe_priv "$PREFIX" rm -rf "$PREFIX/web.new"
-maybe_priv "$PREFIX" cp -a "$stage/web" "$PREFIX/web.new"
-maybe_priv "$PREFIX" chmod -R a+rX "$PREFIX/web.new"
-maybe_priv "$PREFIX" rm -rf "$PREFIX/web.old"
-if [[ -e "$PREFIX/web" ]]; then maybe_priv "$PREFIX" mv "$PREFIX/web" "$PREFIX/web.old"; fi
-maybe_priv "$PREFIX" mv "$PREFIX/web.new" "$PREFIX/web"
-maybe_priv "$PREFIX" rm -rf "$PREFIX/web.old"
+# Web assets: versioned release + atomic symlink switch (see publish_web in common.sh).
+publish_web "$root/web" "$PREFIX" || die "could not install web assets; the previous assets were left in place"
 
 info "Installed SignalAtlas to $PREFIX (no service started, nothing enabled)."
 info "Run it with:  $PREFIX/bin/signalatlas"
