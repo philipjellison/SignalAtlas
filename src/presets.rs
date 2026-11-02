@@ -276,6 +276,7 @@ fn temporary_path(path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
