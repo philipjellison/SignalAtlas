@@ -10,6 +10,8 @@ StateDirectory=signalatlas
 WorkingDirectory=/opt/signalatlas
 ExecStart=/opt/signalatlas/bin/signalatlas
 Environment=SIGNALATLAS_BIND=0.0.0.0:3000
+Environment=SIGNALATLAS_WEB=/opt/signalatlas/web
+Environment=SIGNALATLAS_DATA_DIR=/var/lib/signalatlas
 Environment=SIGNALATLAS_CONFIG=/var/lib/signalatlas/config.json
 Environment=SIGNALATLAS_WSPR_CACHE=/var/lib/signalatlas/wspr-cache.json
 Restart=on-failure

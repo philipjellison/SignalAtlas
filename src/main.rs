@@ -1,9 +1,10 @@
 mod config;
+mod paths;
 mod presets;
 mod server;
 mod wspr;
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Context;
 use config::{ConfigStore, WsprScope};
@@ -27,25 +28,24 @@ async fn main() -> anyhow::Result<()> {
     let address: SocketAddr = bind
         .parse()
         .context("SIGNALATLAS_BIND must be an IP address and port")?;
-    let config_path = std::env::var_os("SIGNALATLAS_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("data/config.json"));
-    let preset_path = std::env::var_os("SIGNALATLAS_PRESETS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            config_path
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new("data"))
-                .join("presets.json")
-        });
-
-    let cache_path = std::env::var_os("SIGNALATLAS_WSPR_CACHE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("data/wspr-cache.json"));
+    let paths = paths::resolve(&paths::Inputs::from_environment())?;
+    info!(
+        web = %paths.web_root.display(),
+        config = %paths.config.display(),
+        presets = %paths.presets.display(),
+        wspr_cache = %paths.wspr_cache.display(),
+        data_location = paths.data_source,
+        "resolved paths"
+    );
+    let cache_path = paths.wspr_cache;
     let endpoint = std::env::var("SIGNALATLAS_WSPR_ENDPOINT")
         .unwrap_or_else(|_| "https://db1.wspr.live/".into());
-    let store = ConfigStore::load(config_path).await?;
-    let presets = PresetStore::load(preset_path).await?;
+    let store = ConfigStore::load(paths.config.clone())
+        .await
+        .with_context(|| format!("load configuration {}", paths.config.display()))?;
+    let presets = PresetStore::load(paths.presets.clone())
+        .await
+        .with_context(|| format!("load presets {}", paths.presets.display()))?;
     let config = store.get();
     let mut snapshot = WsprSnapshot::load(&cache_path).await;
     if snapshot.scope != config.wspr_scope
@@ -63,8 +63,10 @@ async fn main() -> anyhow::Result<()> {
         cache_path,
         state.poll_notify(),
     ));
-    let app = server::router(state, PathBuf::from("web"));
-    let listener = TcpListener::bind(address).await?;
+    let app = server::router(state, paths.web_root);
+    let listener = TcpListener::bind(address).await.with_context(|| {
+        format!("cannot listen on {address} (is another instance or program using the port?)")
+    })?;
     info!(%address, "SignalAtlas is ready");
 
     axum::serve(listener, app)
