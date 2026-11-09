@@ -3,12 +3,51 @@ import { solarPosition } from "./astronomy.js";
 import { displayTimestamp } from "./timeline.js";
 import { parseWsprTime, visibleSpots } from "./wspr.js";
 import { maidenheadToCoordinates } from "./map.js";
-import { centerLongitude, mapLayout, politicalTimezoneLabels, solarFixedScreenPosition, timezoneLabelVerticalOffset, timezoneSegments } from "./display-core.js";
+import { centerLongitude, frameNeeded, mapLayout, playbackAnimating, politicalTimezoneLabels, solarFixedScreenPosition, timezoneLabelVerticalOffset, timezoneSegments } from "./display-core.js";
 const MAX_WIDTH = 2560;
 const MAX_HEIGHT = 1440;
 const BASE_VERTEX_BYTES = 6 * Float32Array.BYTES_PER_ELEMENT;
 const DARK_BOUNDARY_COLOR = new Float32Array([0.04, 0.055, 0.07]);
 const LIGHT_BOUNDARY_COLOR = new Float32Array([0.92, 0.96, 0.99]);
+const STARTUP_RETRY_MS = 10_000;
+const WSPR_RETRY_MS = 15_000;
+
+// An unattended kiosk has nobody watching the console. If the renderer fails
+// before its first frame, say so on screen and reload once the server answers,
+// instead of leaving a permanently blank display.
+let rendererReady = false;
+let startupFailureShown = false;
+
+function reportStartupFailure(error) {
+  console.error("SignalAtlas display:", error);
+  if (rendererReady || startupFailureShown) return;
+  startupFailureShown = true;
+  const message = document.createElement("div");
+  message.setAttribute("role", "alert");
+  message.style.cssText = "position:fixed;inset:auto 0 0 0;z-index:100;padding:12px 18px;"
+    + "background:#3a1414;color:#ffd7d7;font:16px system-ui,sans-serif;text-align:center";
+  message.textContent = `SignalAtlas display could not start (${error?.message ?? error}). Retrying automatically…`;
+  document.body.append(message);
+  reloadWhenServerAnswers();
+}
+
+async function reloadWhenServerAnswers() {
+  for (;;) {
+    await new Promise(resolve => window.setTimeout(resolve, STARTUP_RETRY_MS));
+    try {
+      const response = await fetch("/api/health", { cache: "no-store" });
+      if (response.ok) {
+        window.location.reload();
+        return;
+      }
+    } catch {
+      // Server still unreachable; keep waiting rather than reloading into a browser error page.
+    }
+  }
+}
+
+window.addEventListener("error", event => reportStartupFailure(event.error ?? event.message));
+window.addEventListener("unhandledrejection", event => reportStartupFailure(event.reason));
 
 const vertexSource = `#version 300 es
 in vec2 a_position;
@@ -300,6 +339,34 @@ let wsprCount = 0;
 let wsprOrigin = 0;
 let wsprSelectionUpdated = 0;
 let currentMapLayout = { width: 1, height: 1, top: 0 };
+let appliedLayoutKey = "";
+let needsRedraw = true;
+let lastRenderedSecond = null;
+let timezoneLabelGeneration = 0;
+let timezoneLabelKey = "";
+let wsprAnnouncedVersion = null;
+let wsprLoadedVersion = null;
+let wsprFetching = false;
+let wsprRetryTimer = null;
+
+function markDirty() {
+  needsRedraw = true;
+}
+
+// DOM writes invalidate style and layout even when the value is unchanged
+// (textContent always replaces the text node), so only write real changes.
+const writtenValues = new WeakMap();
+function writeOnce(element, key, value, apply) {
+  let values = writtenValues.get(element);
+  if (!values) writtenValues.set(element, values = {});
+  if (values[key] === value) return;
+  values[key] = value;
+  apply(value);
+}
+const setText = (element, text) => writeOnce(element, "text", text, value => { element.textContent = value; });
+const setHidden = (element, hidden) => writeOnce(element, "hidden", hidden, value => { element.hidden = value; });
+const setStyle = (element, property, value) => writeOnce(element, property, value, next => { element.style[property] = next; });
+const setEdge = (element, edge) => writeOnce(element, "edge", edge, value => { element.dataset.edge = value; });
 
 function resize() {
   // This route is deliberately full-screen. Using the viewport directly also
@@ -308,9 +375,13 @@ function resize() {
   const cssWidth = layout.width;
   const cssHeight = layout.height;
   currentMapLayout = layout;
-  canvas.style.width = `${cssWidth}px`;
-  canvas.style.height = `${cssHeight}px`;
-  canvas.style.top = `${layout.top}px`;
+  const layoutKey = `${cssWidth}x${cssHeight}@${layout.top}`;
+  if (layoutKey !== appliedLayoutKey) {
+    appliedLayoutKey = layoutKey;
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    canvas.style.top = `${layout.top}px`;
+  }
   const scale = Math.min(window.devicePixelRatio || 1, MAX_WIDTH / cssWidth, MAX_HEIGHT / cssHeight);
   const width = Math.max(1, Math.round(cssWidth * scale));
   const height = Math.max(1, Math.round(cssHeight * scale));
@@ -321,12 +392,36 @@ function resize() {
   }
 }
 
-async function refreshSnapshot() {
-  const response = await fetch("/api/wspr", { cache: "no-store" });
-  if (response.ok) {
-    snapshot = await response.json();
+// The server announces a new snapshot version over the WebSocket. Fetch only
+// when it differs from what is loaded, with at most one request in flight, so
+// an older response can never overwrite a newer one.
+function announceWsprVersion(version) {
+  wsprAnnouncedVersion = version;
+  fetchWsprIfNeeded();
+}
+
+async function fetchWsprIfNeeded() {
+  if (wsprFetching || wsprAnnouncedVersion === null || wsprAnnouncedVersion === wsprLoadedVersion) return;
+  wsprFetching = true;
+  window.clearTimeout(wsprRetryTimer);
+  wsprRetryTimer = null;
+  let failed = false;
+  try {
+    const response = await fetch("/api/wspr", { cache: "no-store" });
+    if (!response.ok) throw new Error(`WSPR snapshot request failed (HTTP ${response.status})`);
+    const next = await response.json();
+    snapshot = next;
+    wsprLoadedVersion = next.version ?? wsprAnnouncedVersion;
     wsprSelectionUpdated = 0;
+    markDirty();
+  } catch (error) {
+    failed = true;
+    console.error("SignalAtlas display:", error);
+  } finally {
+    wsprFetching = false;
   }
+  if (failed) wsprRetryTimer = window.setTimeout(fetchWsprIfNeeded, WSPR_RETRY_MS);
+  else fetchWsprIfNeeded();
 }
 
 async function ensureNaturalTexture() {
@@ -336,6 +431,7 @@ async function ensureNaturalTexture() {
     const loaded = await loadTexture(gl, "/assets/maps/natural-earth.webp", 2);
     textures.push(loaded.texture);
     naturalTextureReady = true;
+    markDirty();
   } finally {
     naturalTextureLoading = false;
   }
@@ -348,6 +444,7 @@ async function ensurePoliticalTexture() {
     const loaded = await loadTexture(gl, "/assets/maps/political-relief.webp", 3);
     textures.push(loaded.texture);
     politicalTextureReady = true;
+    markDirty();
   } finally {
     politicalTextureLoading = false;
   }
@@ -404,15 +501,21 @@ function selectTimezoneLabels() {
   });
   timezoneLabelLayer.replaceChildren(...timezoneLabels.map(label => label.element));
   timezoneLabelStyle = state.timezone_style;
+  timezoneLabelGeneration += 1;
 }
 
 function updateTimezoneLabels(subsolarLongitude) {
   if (!state.timezone_visible) {
-    timezoneLabelLayer.hidden = true;
+    setHidden(timezoneLabelLayer, true);
     return;
   }
   selectTimezoneLabels();
-  timezoneLabelLayer.hidden = false;
+  setHidden(timezoneLabelLayer, false);
+  // Placement only changes when the map moves by a visible amount (0.01° is
+  // well under a pixel), the viewport changes, or the label set changes.
+  const key = `${subsolarLongitude.toFixed(2)}|${appliedLayoutKey}|${window.innerWidth}x${window.innerHeight}|${timezoneLabelGeneration}`;
+  if (key === timezoneLabelKey) return;
+  timezoneLabelKey = key;
   const occupied = [];
   const collisionDistance = 105 * window.innerWidth / 1920;
   for (const label of timezoneLabels) {
@@ -432,8 +535,19 @@ function updateTimezoneLabels(subsolarLongitude) {
 function draw() {
   window.requestAnimationFrame(draw);
   if (!state || !texturesReady) return;
-  resize();
   const timestamp = displayTimestamp(state, snapshot, new Date());
+  const second = Math.floor(timestamp.getTime() / 1000);
+  if (!frameNeeded(needsRedraw, playbackAnimating(state), second, lastRenderedSecond)) return;
+  needsRedraw = false;
+  lastRenderedSecond = second;
+  render(timestamp);
+  rendererReady = true;
+}
+
+// When a frame is skipped the browser keeps presenting the last one, so the
+// map stays on screen without redrawing it at the display refresh rate.
+function render(timestamp) {
+  resize();
   if (Math.abs(timestamp.getTime() - wsprSelectionUpdated) >= 5000) updateWsprBuffer(timestamp);
   const sun = solarPosition(timestamp);
   const shack = state.shack_locator ? maidenheadToCoordinates(state.shack_locator) : { longitude: 0, latitude: 0 };
@@ -498,19 +612,18 @@ function draw() {
     gl.drawArrays(gl.POINTS, 0, 1);
   }
   const shackScreen = solarFixedScreenPosition(shack.longitude, shack.latitude, mapCenter);
-  stationName.textContent = state.receiver_callsign;
-  stationName.hidden = !state.station_name_visible || !state.receiver_callsign;
+  setText(stationName, state.receiver_callsign);
+  setHidden(stationName, !state.station_name_visible || !state.receiver_callsign);
   const shackLabelParts = [];
   if (state.station_name_visible && state.receiver_callsign) shackLabelParts.push(state.receiver_callsign);
   if (state.maidenhead_visible && state.shack_locator) shackLabelParts.push(state.shack_locator);
-  shackLabel.textContent = shackLabelParts.join(" · ");
-  shackLabel.hidden = !shackVisible;
-  shackLabel.style.left = `${shackScreen.x * 100}%`;
-  shackLabel.style.top = `${currentMapLayout.top + shackScreen.y * currentMapLayout.height}px`;
-  shackLabel.dataset.edge = shackScreen.x > 0.9 ? "right" : "left";
+  setText(shackLabel, shackLabelParts.join(" · "));
+  setHidden(shackLabel, !shackVisible);
+  setStyle(shackLabel, "left", `${(shackScreen.x * 100).toFixed(3)}%`);
+  setStyle(shackLabel, "top", `${(currentMapLayout.top + shackScreen.y * currentMapLayout.height).toFixed(1)}px`);
+  setEdge(shackLabel, shackScreen.x > 0.9 ? "right" : "left");
   updateTimezoneLabels(mapCenter);
-  timeLabel.textContent = timestamp.toISOString().slice(0, 19).replace("T", " ") + " UTC";
-
+  setText(timeLabel, timestamp.toISOString().slice(0, 19).replace("T", " ") + " UTC");
 }
 
 connectState(next => {
@@ -518,12 +631,10 @@ connectState(next => {
   wsprSelectionUpdated = 0;
   timezoneBufferStyle = null;
   timezoneLabelStyle = null;
+  markDirty();
   if (state.map_style === "natural_earth") ensureNaturalTexture().catch(error => { console.error("SignalAtlas display:", error); });
   if (state.map_style === "political_relief") ensurePoliticalTexture().catch(error => { console.error("SignalAtlas display:", error); });
-  refreshSnapshot().catch(error => { console.error("SignalAtlas display:", error); });
-});
-
-window.setInterval(() => refreshSnapshot().catch(error => { console.error("SignalAtlas display:", error); }), 60_000);
+}, undefined, announceWsprVersion);
 
 Promise.all([
   loadTexture(gl, "/assets/maps/blue-marble-january.webp", 0),
@@ -533,7 +644,8 @@ Promise.all([
     textures.push(loaded.texture);
   }
   texturesReady = true;
-}).catch(error => { console.error("SignalAtlas display:", error); });
+  markDirty();
+}).catch(reportStartupFailure);
 
 fetch("/assets/maps/timezones-10m.geojson")
   .then(response => {
@@ -545,6 +657,7 @@ fetch("/assets/maps/timezones-10m.geojson")
     politicalLabelData = politicalTimezoneLabels(geojson);
     timezoneBufferStyle = null;
     timezoneLabelStyle = null;
+    markDirty();
   })
   .catch(error => { console.error("SignalAtlas display:", error); });
 
@@ -558,9 +671,13 @@ fetch("/assets/maps/countries-50m.geojson")
     gl.bindBuffer(gl.ARRAY_BUFFER, countryBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
     countryCount = data.length / 4;
+    markDirty();
   })
   .catch(error => { console.error("SignalAtlas display:", error); });
 
-window.addEventListener("resize", resize);
+window.addEventListener("resize", () => {
+  resize();
+  markDirty();
+});
 resize();
 window.requestAnimationFrame(draw);
