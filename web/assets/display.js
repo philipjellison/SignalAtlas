@@ -180,14 +180,12 @@ async function loadTexture(gl, url, unit) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  const estimatedBytes = bitmap.width * bitmap.height * 4;
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, bitmap);
   bitmap.close();
-  return { texture, estimatedBytes };
+  return { texture };
 }
 
 const canvas = document.querySelector("#display-map");
-const metrics = document.querySelector("#display-metrics");
 const timeLabel = document.querySelector("#display-time");
 const stationName = document.querySelector("#display-station-name");
 const shackLabel = document.querySelector("#display-shack-label");
@@ -196,23 +194,15 @@ let contextRecoveryTimer = null;
 canvas.addEventListener("webglcontextlost", event => {
   event.preventDefault();
   console.error("WebGL context lost; reloading the SignalAtlas display to recover");
-  metrics.textContent = "WebGL context lost · reloading display…";
   contextRecoveryTimer ??= window.setTimeout(() => window.location.reload(), 3000);
 });
 canvas.addEventListener("webglcontextrestored", () => {
   console.warn("WebGL context restored; reloading the SignalAtlas display to rebuild renderer resources");
-  metrics.textContent = "WebGL context restored · rebuilding display…";
   if (contextRecoveryTimer !== null) window.clearTimeout(contextRecoveryTimer);
   contextRecoveryTimer = window.setTimeout(() => window.location.reload(), 250);
 });
 const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false, powerPreference: "high-performance" });
 if (!gl) throw new Error("WebGL2 is unavailable");
-let gpuTimer = null;
-try {
-  gpuTimer = gl.getExtension("EXT_disjoint_timer_query_webgl2");
-} catch {
-  // GPU timing is optional and must never prevent the renderer from starting.
-}
 
 const program = createProgram(gl);
 gl.useProgram(program);
@@ -280,7 +270,6 @@ gl.enableVertexAttribArray(countryAttribute);
 gl.vertexAttribPointer(countryAttribute, 4, gl.FLOAT, false, 0, 0);
 gl.vertexAttribDivisor(countryAttribute, 1);
 let countryCount = 0;
-let countryBufferBytes = 0;
 const shackProgram = createProgram(gl, shackVertexSource, shackFragmentSource);
 const shackVao = gl.createVertexArray();
 const shackUniforms = {
@@ -296,10 +285,8 @@ let politicalTimezoneData = null;
 let politicalLabelData = null;
 let timezoneBufferStyle = null;
 let timezoneCount = 0;
-let timezoneBufferBytes = 0;
 let timezoneLabelStyle = null;
 let timezoneLabels = [];
-let timezoneLabelVisibleCount = 0;
 
 let state = null;
 let snapshot = { fetched_at: null };
@@ -308,39 +295,11 @@ let naturalTextureReady = false;
 let naturalTextureLoading = false;
 let politicalTextureReady = false;
 let politicalTextureLoading = false;
-let textureBytes = 0;
 const textures = [];
 let wsprCount = 0;
-let wsprBufferBytes = 0;
 let wsprOrigin = 0;
 let wsprSelectionUpdated = 0;
-let metricStarted = performance.now();
-let metricFrames = 0;
-let metricRenderTotal = 0;
-let metricGpuFrames = 0;
-let metricGpuTotal = 0;
-const pendingGpuQueries = [];
 let currentMapLayout = { width: 1, height: 1, top: 0 };
-
-function collectGpuTimings() {
-  if (!gpuTimer) return;
-  try {
-    const disjoint = gl.getParameter(gpuTimer.GPU_DISJOINT_EXT);
-    while (pendingGpuQueries.length > 0) {
-      const query = pendingGpuQueries[0];
-      if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) break;
-      pendingGpuQueries.shift();
-      if (!disjoint) {
-        metricGpuTotal += gl.getQueryParameter(query, gl.QUERY_RESULT) / 1_000_000;
-        metricGpuFrames += 1;
-      }
-      gl.deleteQuery(query);
-    }
-  } catch {
-    gpuTimer = null;
-    pendingGpuQueries.splice(0).forEach(query => gl.deleteQuery(query));
-  }
-}
 
 function resize() {
   // This route is deliberately full-screen. Using the viewport directly also
@@ -376,7 +335,6 @@ async function ensureNaturalTexture() {
   try {
     const loaded = await loadTexture(gl, "/assets/maps/natural-earth.webp", 2);
     textures.push(loaded.texture);
-    textureBytes += loaded.estimatedBytes;
     naturalTextureReady = true;
   } finally {
     naturalTextureLoading = false;
@@ -389,7 +347,6 @@ async function ensurePoliticalTexture() {
   try {
     const loaded = await loadTexture(gl, "/assets/maps/political-relief.webp", 3);
     textures.push(loaded.texture);
-    textureBytes += loaded.estimatedBytes;
     politicalTextureReady = true;
   } finally {
     politicalTextureLoading = false;
@@ -400,7 +357,6 @@ function updateWsprBuffer(displayTime) {
   wsprSelectionUpdated = displayTime.getTime();
   if (!state.wspr_visible) {
     wsprCount = 0;
-    wsprBufferBytes = 0;
     gl.bindBuffer(gl.ARRAY_BUFFER, wsprBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, 0, gl.DYNAMIC_DRAW);
     return;
@@ -419,7 +375,6 @@ function updateWsprBuffer(displayTime) {
   gl.bindBuffer(gl.ARRAY_BUFFER, wsprBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
   wsprCount = selected.length;
-  wsprBufferBytes = data.byteLength;
 }
 
 function selectTimezoneBuffer() {
@@ -433,7 +388,6 @@ function selectTimezoneBuffer() {
   gl.bindBuffer(gl.ARRAY_BUFFER, timezoneBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
   timezoneCount = data.length / 4;
-  timezoneBufferBytes = data.byteLength;
   timezoneBufferStyle = style;
 }
 
@@ -455,13 +409,11 @@ function selectTimezoneLabels() {
 function updateTimezoneLabels(subsolarLongitude) {
   if (!state.timezone_visible) {
     timezoneLabelLayer.hidden = true;
-    timezoneLabelVisibleCount = 0;
     return;
   }
   selectTimezoneLabels();
   timezoneLabelLayer.hidden = false;
   const occupied = [];
-  timezoneLabelVisibleCount = 0;
   const collisionDistance = 105 * window.innerWidth / 1920;
   for (const label of timezoneLabels) {
     const point = solarFixedScreenPosition(label.longitude, label.latitude, subsolarLongitude);
@@ -474,15 +426,12 @@ function updateTimezoneLabels(subsolarLongitude) {
     label.element.style.left = `${point.x * 100}%`;
     label.element.style.top = `${y}px`;
     occupied.push({ x, y });
-    timezoneLabelVisibleCount += 1;
   }
 }
 
 function draw() {
   window.requestAnimationFrame(draw);
   if (!state || !texturesReady) return;
-  collectGpuTimings();
-  const started = performance.now();
   resize();
   const timestamp = displayTimestamp(state, snapshot, new Date());
   if (Math.abs(timestamp.getTime() - wsprSelectionUpdated) >= 5000) updateWsprBuffer(timestamp);
@@ -499,17 +448,6 @@ function draw() {
   gl.uniform1i(uniforms.useNightLights, state.map_style === "blue_marble_lights" ? 1 : 0);
   gl.uniform1i(uniforms.useNatural, state.map_style === "natural_earth" && naturalTextureReady ? 1 : 0);
   gl.uniform1i(uniforms.usePolitical, state.map_style === "political_relief" && politicalTextureReady ? 1 : 0);
-  let gpuQuery = null;
-  if (gpuTimer && pendingGpuQueries.length < 16) {
-    try {
-      gpuQuery = gl.createQuery();
-      gl.beginQuery(gpuTimer.TIME_ELAPSED_EXT, gpuQuery);
-    } catch {
-      if (gpuQuery) gl.deleteQuery(gpuQuery);
-      gpuQuery = null;
-      gpuTimer = null;
-    }
-  }
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   const darkBoundaryLines = state.map_style === "natural_earth" || state.map_style === "political_relief";
   const boundaryColor = darkBoundaryLines ? DARK_BOUNDARY_COLOR : LIGHT_BOUNDARY_COLOR;
@@ -571,43 +509,8 @@ function draw() {
   shackLabel.style.top = `${currentMapLayout.top + shackScreen.y * currentMapLayout.height}px`;
   shackLabel.dataset.edge = shackScreen.x > 0.9 ? "right" : "left";
   updateTimezoneLabels(mapCenter);
-  if (gpuQuery) {
-    try {
-      gl.endQuery(gpuTimer.TIME_ELAPSED_EXT);
-      pendingGpuQueries.push(gpuQuery);
-    } catch {
-      gl.deleteQuery(gpuQuery);
-      gpuTimer = null;
-    }
-  }
-  metricFrames += 1;
-  metricRenderTotal += performance.now() - started;
   timeLabel.textContent = timestamp.toISOString().slice(0, 19).replace("T", " ") + " UTC";
-  const elapsed = performance.now() - metricStarted;
-  if (elapsed >= 1000) {
-    const gpuAverage = metricGpuFrames > 0 ? metricGpuTotal / metricGpuFrames : null;
-    const gpuText = !gpuTimer
-      ? "GPU timer unavailable"
-      : gpuAverage === null
-        ? "GPU timing pending"
-        : `${gpuAverage.toFixed(3)} ms GPU/frame · ~${Math.round(1000 / gpuAverage)} GPU FPS`;
-    const wsprText = state.wspr_visible ? `${wsprCount} WSPR points${snapshot.stale ? " (cached)" : ""}` : "WSPR hidden";
-    const timezoneText = state.timezone_visible ? `${timezoneCount} ${state.timezone_style} TZ segments · ${timezoneLabelVisibleCount} labels` : "TZ hidden";
-    const countryText = `${countryCount} country segments`;
-    const backgroundText = state.map_style === "political_relief"
-      ? politicalTextureReady ? "Political Relief" : "Political Relief loading"
-      : state.map_style === "natural_earth"
-        ? naturalTextureReady ? "Natural Earth" : "Natural Earth loading"
-        : state.map_style === "blue_marble_lights" ? "Blue Marble + lights" : "Blue Marble";
-    const layoutText = state.stretch_backgrounds ? "stretched" : "2:1 centered";
-    const centerText = state.map_center === "terminator" ? "terminator-centered" : `${state.map_center}-centered`;
-    const geometryVertices = 4 + countryCount * 6 + wsprCount + (state.timezone_visible ? timezoneCount * 6 : 0);
-    const bufferMebibytes = (BASE_VERTEX_BYTES + countryBufferBytes + wsprBufferBytes + timezoneBufferBytes) / (1024 * 1024);
-    const textureMebibytes = textureBytes / (1024 * 1024);
-    const geometryText = `${geometryVertices.toLocaleString()} vertices/frame · ${bufferMebibytes.toFixed(2)} MiB GPU buffers · ~${textureMebibytes.toFixed(0)} MiB textures`;
-    metrics.textContent = `UNCAPPED · ${(metricFrames * 1000 / elapsed).toFixed(1)} submitted FPS · ${(metricRenderTotal / metricFrames).toFixed(2)} ms JS/frame · ${gpuText} · ${backgroundText} · ${centerText} · ${layoutText} · ${wsprText} · ${timezoneText} · ${countryText} · ${geometryText} · ${canvas.width}×${canvas.height}`;
-    metricStarted = performance.now(); metricFrames = 0; metricRenderTotal = 0; metricGpuFrames = 0; metricGpuTotal = 0;
-  }
+
 }
 
 connectState(next => {
@@ -615,12 +518,12 @@ connectState(next => {
   wsprSelectionUpdated = 0;
   timezoneBufferStyle = null;
   timezoneLabelStyle = null;
-  if (state.map_style === "natural_earth") ensureNaturalTexture().catch(error => { metrics.textContent = error.message; });
-  if (state.map_style === "political_relief") ensurePoliticalTexture().catch(error => { metrics.textContent = error.message; });
-  refreshSnapshot().catch(error => { metrics.textContent = error.message; });
+  if (state.map_style === "natural_earth") ensureNaturalTexture().catch(error => { console.error("SignalAtlas display:", error); });
+  if (state.map_style === "political_relief") ensurePoliticalTexture().catch(error => { console.error("SignalAtlas display:", error); });
+  refreshSnapshot().catch(error => { console.error("SignalAtlas display:", error); });
 });
 
-window.setInterval(() => refreshSnapshot().catch(error => { metrics.textContent = error.message; }), 60_000);
+window.setInterval(() => refreshSnapshot().catch(error => { console.error("SignalAtlas display:", error); }), 60_000);
 
 Promise.all([
   loadTexture(gl, "/assets/maps/blue-marble-january.webp", 0),
@@ -628,10 +531,9 @@ Promise.all([
 ]).then(loadedTextures => {
   for (const loaded of loadedTextures) {
     textures.push(loaded.texture);
-    textureBytes += loaded.estimatedBytes;
   }
   texturesReady = true;
-}).catch(error => { metrics.textContent = error.message; });
+}).catch(error => { console.error("SignalAtlas display:", error); });
 
 fetch("/assets/maps/timezones-10m.geojson")
   .then(response => {
@@ -644,7 +546,7 @@ fetch("/assets/maps/timezones-10m.geojson")
     timezoneBufferStyle = null;
     timezoneLabelStyle = null;
   })
-  .catch(error => { metrics.textContent = error.message; });
+  .catch(error => { console.error("SignalAtlas display:", error); });
 
 fetch("/assets/maps/countries-50m.geojson")
   .then(response => {
@@ -656,9 +558,8 @@ fetch("/assets/maps/countries-50m.geojson")
     gl.bindBuffer(gl.ARRAY_BUFFER, countryBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
     countryCount = data.length / 4;
-    countryBufferBytes = data.byteLength;
   })
-  .catch(error => { metrics.textContent = error.message; });
+  .catch(error => { console.error("SignalAtlas display:", error); });
 
 window.addEventListener("resize", resize);
 resize();
