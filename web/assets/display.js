@@ -180,10 +180,9 @@ async function loadTexture(gl, url, unit) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  const estimatedBytes = bitmap.width * bitmap.height * 4;
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, bitmap);
   bitmap.close();
-  return { texture, estimatedBytes };
+  return { texture };
 }
 
 const canvas = document.querySelector("#display-map");
@@ -358,7 +357,6 @@ function updateWsprBuffer(displayTime) {
   wsprSelectionUpdated = displayTime.getTime();
   if (!state.wspr_visible) {
     wsprCount = 0;
-    wsprBufferBytes = 0;
     gl.bindBuffer(gl.ARRAY_BUFFER, wsprBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, 0, gl.DYNAMIC_DRAW);
     return;
