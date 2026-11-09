@@ -4,6 +4,20 @@ SignalAtlas is a world-map display for amateur radio stations and anyone who lik
 
 Typical uses: a shack wall display, a club-station status screen, or a desktop window showing where your WSPR signals are being heard.
 
+## Screenshots
+
+### Blue Marble with night lights
+
+![SignalAtlas showing WSPR reception activity, nighttime city lights, timezone boundaries, and the solar terminator on the Blue Marble map](docs/screenshots/Screenshot%20From%202026-11-08%2020-51-35.png)
+
+*Blue Marble with night lights — live WSPR reception activity, station location, timezone boundaries, and solar illumination.*
+
+### Natural Earth
+
+![SignalAtlas showing WSPR reception activity, shaded terrain and ocean relief, timezone boundaries, and the day-night terminator on the Natural Earth map](docs/screenshots/Screenshot%20From%202026-11-08%2022-14-54.png)
+
+*Natural Earth — terrain and ocean-floor relief with the day/night terminator and WSPR reception markers.*
+
 ## Features
 
 - **World map rendering** with a WebGL2 renderer and four map styles: political relief, Natural Earth, NASA Blue Marble, and Blue Marble with night lights. The map can be centered on Greenwich, your station, or the Sun.
