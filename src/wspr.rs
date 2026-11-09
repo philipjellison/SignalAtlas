@@ -284,6 +284,7 @@ pub fn snapshot_mismatches(config: &DisplayConfig, snapshot: &WsprSnapshot) -> b
     snapshot.scope != config.wspr_scope
         || (config.wspr_scope == WsprScope::Callsign
             && snapshot.receiver != config.receiver_callsign)
+        || snapshot.window_minutes != requested_window(config)
 }
 
 fn request_matches_config(
@@ -352,6 +353,23 @@ mod tests {
             },
             &snapshot
         ));
+    }
+
+    #[test]
+    fn changed_history_window_invalidates_cached_snapshot() {
+        let config = DisplayConfig {
+            wspr_mode: WsprMode::Historical,
+            history_hours: 48,
+            ..Default::default()
+        };
+        let cached = WsprSnapshot {
+            scope: config.wspr_scope,
+            receiver: config.receiver_callsign.clone(),
+            window_minutes: 24 * 60,
+            fetched_at: Some("2026-08-24T19:40:00+00:00".into()),
+            ..Default::default()
+        };
+        assert!(snapshot_mismatches(&config, &cached));
     }
 
     #[test]
