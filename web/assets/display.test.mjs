@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { centerLongitude, mapLayout, normalizeLongitude, politicalTimezoneLabels, shouldDrawFrame, solarFixedEarthLongitude, solarFixedScreenPosition, textureCoordinates, timezoneLabelVerticalOffset, timezoneSegments } from "./display-core.js";
+import { centerLongitude, frameNeeded, playbackAnimating, mapLayout, normalizeLongitude, politicalTimezoneLabels, shouldDrawFrame, solarFixedEarthLongitude, solarFixedScreenPosition, textureCoordinates, timezoneLabelVerticalOffset, timezoneSegments } from "./display-core.js";
 
 test("solar-fixed longitude rotates Earth beneath a stationary subsolar point", () => {
   assert.equal(solarFixedEarthLongitude(0, 45), 45);
@@ -60,4 +60,18 @@ test("lowers idealized and selected top-edge political timezone labels", () => {
   assert.equal(timezoneLabelVerticalOffset("political", "UTC-12", 67, 2160), 20);
   assert.equal(timezoneLabelVerticalOffset("political", "UTC±00", 67, 1080), 10);
   assert.equal(timezoneLabelVerticalOffset("political", "UTC+5", 67, 1080), 0);
+});
+
+test("live display redraws once per displayed second unless something changed", () => {
+  assert.equal(frameNeeded(false, false, 100, 100), false);
+  assert.equal(frameNeeded(false, false, 101, 100), true);
+  assert.equal(frameNeeded(true, false, 100, 100), true);
+  assert.equal(frameNeeded(false, true, 100, 100), true);
+});
+
+test("only running historical playback animates every frame", () => {
+  assert.equal(playbackAnimating({ wspr_mode: "live", playback_running: true }), false);
+  assert.equal(playbackAnimating({ wspr_mode: "historical", playback_running: false }), false);
+  assert.equal(playbackAnimating({ wspr_mode: "historical", playback_running: true }), true);
+  assert.equal(playbackAnimating(null), false);
 });

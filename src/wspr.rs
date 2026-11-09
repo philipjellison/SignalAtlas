@@ -11,7 +11,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
-    sync::{Notify, RwLock},
+    sync::{Notify, RwLock, watch},
     time::MissedTickBehavior,
 };
 
@@ -40,6 +40,11 @@ pub struct WsprSnapshot {
     pub stale: bool,
     pub error: Option<String>,
     pub window_minutes: u16,
+    /// Changes whenever the served snapshot changes, so browsers only download
+    /// it when there is something new. Not persisted: the server seeds it from
+    /// its start time so versions from different server runs never collide.
+    #[serde(skip_deserializing)]
+    pub version: u64,
     pub spots: Vec<WsprSpot>,
 }
 
@@ -64,6 +69,26 @@ impl WsprSnapshot {
         fs::write(&temporary, serde_json::to_vec(self)?).await?;
         fs::rename(PathBuf::from(temporary), path).await?;
         Ok(())
+    }
+
+    /// Replace the served snapshot and announce its new version.
+    pub fn publish(slot: &mut Self, mut next: Self, versions: &watch::Sender<u64>) {
+        next.version = slot.version.wrapping_add(1);
+        *slot = next;
+        versions.send_replace(slot.version);
+    }
+
+    /// Mark the served snapshot as stale after a failed refresh. The version
+    /// only changes when the visible condition changes, so a long outage does
+    /// not make browsers re-download identical data every poll.
+    fn mark_failed(&mut self, error: String, versions: &watch::Sender<u64>) {
+        if self.stale && self.error.as_deref() == Some(error.as_str()) {
+            return;
+        }
+        self.stale = true;
+        self.error = Some(error);
+        self.version = self.version.wrapping_add(1);
+        versions.send_replace(self.version);
     }
 
     pub fn pending(receiver: String, scope: WsprScope) -> Self {
@@ -170,6 +195,7 @@ pub async fn run_poller(
     config: Arc<tokio::sync::Mutex<ConfigStore>>,
     cache_path: PathBuf,
     notify: Arc<Notify>,
+    versions: watch::Sender<u64>,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(120));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -204,18 +230,21 @@ pub async fn run_poller(
                     stale: false,
                     error: None,
                     window_minutes: minutes,
+                    // Assigned by publish().
+                    version: 0,
                     spots,
                 };
                 if let Err(error) = next.persist(&cache_path).await {
                     tracing::warn!(%error, "unable to persist WSPR cache");
                 }
-                *snapshot.write().await = next;
+                WsprSnapshot::publish(&mut *snapshot.write().await, next, &versions);
             }
             Err(error) => {
                 tracing::warn!(%error, "WSPR refresh failed; retaining last good data");
-                let mut current = snapshot.write().await;
-                current.stale = true;
-                current.error = Some(error.to_string());
+                snapshot
+                    .write()
+                    .await
+                    .mark_failed(error.to_string(), &versions);
             }
         }
     }
@@ -235,7 +264,26 @@ fn should_refresh(config: &DisplayConfig, snapshot: &WsprSnapshot) -> bool {
         || (config.wspr_scope == WsprScope::Callsign
             && snapshot.receiver != config.receiver_callsign)
         || snapshot.window_minutes != requested_window(config)
-        || snapshot.spots.is_empty()
+        // Never fetched successfully. An empty but successful result is a
+        // valid answer and is not re-queried every poll.
+        || snapshot.fetched_at.is_none()
+}
+
+/// Whether a configuration change affects which WSPR data should be fetched.
+pub fn wspr_inputs_changed(previous: &DisplayConfig, next: &DisplayConfig) -> bool {
+    previous.wspr_visible != next.wspr_visible
+        || previous.wspr_scope != next.wspr_scope
+        || previous.receiver_callsign != next.receiver_callsign
+        || previous.wspr_mode != next.wspr_mode
+        || previous.history_hours != next.history_hours
+}
+
+/// Whether a snapshot was fetched for a different scope or receiver than the
+/// configuration now asks for, and so must not be shown.
+pub fn snapshot_mismatches(config: &DisplayConfig, snapshot: &WsprSnapshot) -> bool {
+    snapshot.scope != config.wspr_scope
+        || (config.wspr_scope == WsprScope::Callsign
+            && snapshot.receiver != config.receiver_callsign)
 }
 
 fn request_matches_config(
@@ -283,6 +331,7 @@ mod tests {
             receiver: config.receiver_callsign.clone(),
             scope: WsprScope::Callsign,
             window_minutes: 1440,
+            fetched_at: Some("2026-08-24T19:40:00+00:00".into()),
             spots: vec![WsprSpot {
                 latest_time: "2026-08-24 19:34:00".into(),
                 band: 14,
@@ -303,6 +352,73 @@ mod tests {
             },
             &snapshot
         ));
+    }
+
+    #[test]
+    fn successful_empty_historical_result_is_not_requeried() {
+        let config = DisplayConfig {
+            wspr_mode: WsprMode::Historical,
+            history_hours: 24,
+            ..Default::default()
+        };
+        let mut snapshot = WsprSnapshot {
+            receiver: config.receiver_callsign.clone(),
+            scope: config.wspr_scope,
+            window_minutes: 1440,
+            ..Default::default()
+        };
+        assert!(should_refresh(&config, &snapshot), "never fetched");
+        snapshot.fetched_at = Some("2026-08-24T19:40:00+00:00".into());
+        assert!(!should_refresh(&config, &snapshot), "fetched, zero spots");
+    }
+
+    #[test]
+    fn publishing_and_new_failures_change_the_version() {
+        let (versions, mut watcher) = watch::channel(10);
+        let mut slot = WsprSnapshot {
+            version: 10,
+            ..Default::default()
+        };
+        WsprSnapshot::publish(&mut slot, WsprSnapshot::default(), &versions);
+        assert_eq!(slot.version, 11);
+        assert_eq!(*watcher.borrow_and_update(), 11);
+        slot.mark_failed("timeout".into(), &versions);
+        assert_eq!(slot.version, 12);
+        slot.mark_failed("timeout".into(), &versions);
+        assert_eq!(
+            slot.version, 12,
+            "repeated identical failure is not new data"
+        );
+    }
+
+    #[test]
+    fn only_wspr_settings_trigger_a_fetch() {
+        let previous = DisplayConfig::default();
+        let cosmetic = DisplayConfig {
+            timezone_visible: !previous.timezone_visible,
+            ..previous.clone()
+        };
+        assert!(!wspr_inputs_changed(&previous, &cosmetic));
+        let rescoped = DisplayConfig {
+            wspr_scope: match previous.wspr_scope {
+                WsprScope::Global => WsprScope::Callsign,
+                WsprScope::Callsign => WsprScope::Global,
+            },
+            ..previous.clone()
+        };
+        assert!(wspr_inputs_changed(&previous, &rescoped));
+    }
+
+    #[test]
+    fn version_is_served_but_not_restored_from_the_cache_file() {
+        let snapshot = WsprSnapshot {
+            version: 42,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(json["version"], 42);
+        let restored: WsprSnapshot = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.version, 0);
     }
 
     #[test]

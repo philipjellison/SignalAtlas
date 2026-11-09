@@ -10,6 +10,17 @@ export function shouldDrawFrame(previousTime, currentTime, targetFps = 30) {
   return previousTime === null || currentTime - previousTime >= 1000 / targetFps;
 }
 
+// The live display only changes visibly once per displayed second (the clock),
+// while the terminator drifts about 2 px per minute. Only historical playback
+// needs a frame on every display refresh.
+export function playbackAnimating(state) {
+  return state?.wspr_mode === "historical" && Boolean(state.playback_running);
+}
+
+export function frameNeeded(dirty, animating, second, lastRenderedSecond) {
+  return dirty || animating || second !== lastRenderedSecond;
+}
+
 export function textureCoordinates(relativeLongitude, latitude, subsolarLongitude) {
   const earthLongitude = solarFixedEarthLongitude(relativeLongitude, subsolarLongitude);
   return {

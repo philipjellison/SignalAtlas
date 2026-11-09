@@ -62,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
         state.config_handle(),
         cache_path,
         state.poll_notify(),
+        state.wspr_versions(),
     ));
     let app = server::router(state, paths.web_root);
     let listener = TcpListener::bind(address).await.with_context(|| {
