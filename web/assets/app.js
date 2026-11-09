@@ -1,4 +1,6 @@
-export function connectState(onState, onStatus = () => {}) {
+// onWspr receives the server's WSPR snapshot version whenever new data is
+// available; pages that do not draw WSPR spots can omit it.
+export function connectState(onState, onStatus = () => {}, onWspr = () => {}) {
   let socket;
   let retry;
   let offlineTimer;
@@ -13,7 +15,9 @@ export function connectState(onState, onStatus = () => {}) {
     });
     socket.addEventListener("message", event => {
       try {
-        onState(JSON.parse(event.data));
+        const message = JSON.parse(event.data);
+        if (message?.type === "wspr") onWspr(message.version);
+        else onState(message);
       } catch (error) {
         console.error("Ignoring invalid SignalAtlas state message", error);
       }

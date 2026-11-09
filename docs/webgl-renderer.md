@@ -9,22 +9,22 @@ After extended testing, this implementation is the production SignalAtlas displa
 - Blue Marble daytime texture;
 - Black Marble nighttime texture;
 - distinct Blue Marble modes with night lights enabled only for the configured night-lights background;
-- a lazily loaded Natural Earth texture and an on-screen conservative estimate of decoded GPU texture memory;
+- a lazily loaded Natural Earth texture;
 - a lazily loaded, precomposited political-relief texture generated from the existing public-domain Natural Earth assets;
-- solar-fixed idealized and political UTC labels with screen-space collision reduction and an on-screen visible-label count;
+- solar-fixed idealized and political UTC labels with screen-space collision reduction;
 - the existing stretch-background setting, with a centered 2:1 map and black information space when stretching is disabled;
 - selectable Greenwich-fixed, shack-fixed, or terminator/solar-fixed centering, with every geographic layer sharing the selected longitude transform;
 - one WebGL2 canvas capped at 2560×1440;
-- continuously advancing historical/current time with no application frame-rate cap (browser animation remains synchronized to the display refresh rate);
-- GPU-completed frame timing through `EXT_disjoint_timer_query_webgl2`, when the browser exposes it, alongside JavaScript submission timing;
+- on-demand redraws: the live display redraws once per displayed second, or immediately when configuration, WSPR data, textures, geometry, or the viewport change; running historical playback redraws on every display refresh;
+- configuration- and time-driven rendering without continuous performance instrumentation;
 - live or historical WSPR cells rendered as GPU point sprites, using the existing band, persistence, visibility, and playback configuration;
 - idealized or political timezone boundaries rendered as simplified, instanced GPU line segments;
-- on-screen WSPR point count, submitted vertices per frame, and allocated vertex-buffer memory for tracking geometry growth;
+- WSPR point rendering without on-screen performance counters;
 - a GPU-rendered shack marker and screen-space station label driven by the same solar-fixed transform;
 - simplified country boundaries rendered through the same instanced, antimeridian-safe GPU line path as timezone geometry;
 - solar-fixed presentation, with the subsolar longitude fixed at screen center and the Earth textures rotating beneath it;
 - hard-edge and civil-twilight shading in a fragment shader;
-- live frame-time/FPS and simulated-time diagnostics.
+- a UTC clock and historical playback display.
 
 Country and timezone geometry, WSPR geometry, and the shack marker have now been added incrementally after the base experiment demonstrated substantial local headroom. Additional labels and background implementations remain staged separately so each performance change can be measured.
 
@@ -44,4 +44,8 @@ The map displays latitudes +75° through −75°, matching the production crop. 
 
 ## Production status
 
-The renderer remains deliberately uncapped for benchmarking and retains its on-screen timing, geometry, buffer, texture, background, and resolution diagnostics. These can be made optional in a later change. WebGL context loss triggers a logged page reload so an unattended display does not remain blank.
+The live display no longer redraws at the display refresh rate. Between redraws the browser keeps presenting the last frame, so the terminator (which drifts about 2 px per minute at 2560 px) and the clock look the same while the Pi's GPU and main thread stay mostly idle. Historical playback still animates every frame.
+
+WSPR data is pushed rather than polled: the server sends `{"type":"wspr","version":N}` over the WebSocket whenever its snapshot changes, and the display downloads `/api/wspr` only when that version differs from what it has, one request at a time.
+
+WebGL context loss triggers a logged page reload so an unattended display does not remain blank. A failure before the first frame (no WebGL2, a shader error, or a base texture that cannot load) shows a message on screen and reloads once `/api/health` answers.
